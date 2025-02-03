@@ -1,10 +1,9 @@
 import yfinance as yf
 from datetime import datetime, timedelta
 
-class StockScraper:
-    def __init__(self, code, fetch_only_flg=False):
+class StockPriceAPI:
+    def __init__(self, code):
         self.code = self._remove_trailing_zero(code)  # 株式コードの末尾のゼロを削除します
-        self.fetch_only_flg = fetch_only_flg
 
     def _remove_trailing_zero(self, code):
         # 株式コードの末尾のゼロを削除します（存在する場合）
@@ -14,7 +13,7 @@ class StockScraper:
         # yfinance APIを使用して株価データを取得します
         today = datetime.now()
         one_year_ago = today - timedelta(days=365)
-        test26days_ago = today - timedelta(days=43)
+        # test26days_ago = today - timedelta(days=43)
         
         # yfinanceで日本株のコードには".T"をつける必要があります
         yf_code = self.code + ".T" 

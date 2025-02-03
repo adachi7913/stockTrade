@@ -9,7 +9,7 @@ if __name__ == "__main__":
     # from accsessEdinet import EdinetHandler  # edinet_handler.py から EdinetHandler をインポート
     # EdinetHandler.getEdinetData()
     import os
-    from data_scraper import (
+    from getStockPriceFromYFinance import (
         StockScraper,
     )  # data_scraper.py から StooqScraper をインポート
     from indicator_calculator import (
@@ -26,14 +26,14 @@ response = requests.get(funcURL)
 stockList = response.json()
 print("stockList:", stockList)
 
-# scraper = StockScraper("7205", fetch_only_flg=False)
-# stock_data = scraper.fetch_data_yfinance()  # 株価データを取得
-# # print("Stock data:", stock_data)
-# indicator_calculator = IndicatorCalculator(
-#     stock_data
-# )  # IndicatorCalculatorのインスタンスを作成
-# indicators = indicator_calculator.get_indicators()  # 指標を計算
-# print("Indicators:", indicators, end="\n\n")
-# api_handler = ApiHandler(stock_data, indicators)  # ApiHandlerのインスタンスを作成
-# gemini_result = api_handler.call_gemini_api()  # Gemini APIを呼び出す
-# print("Result from Gemini API:", gemini_result)
+scraper = StockScraper("7205")  # StockScraperのインスタンスを作成
+stock_data = scraper.fetch_data_yfinance()  # 株価データを取得
+# print("Stock data:", stock_data)
+indicator_calculator = IndicatorCalculator(
+    stock_data
+)  # IndicatorCalculatorのインスタンスを作成
+indicators = indicator_calculator.get_indicators()  # 指標を計算
+print("Indicators:", indicators, end="\n\n")
+api_handler = ApiHandler(stock_data, indicators)  # ApiHandlerのインスタンスを作成
+gemini_result = api_handler.call_gemini_api()  # Gemini APIを呼び出す
+print("Result from Gemini API:", gemini_result)
