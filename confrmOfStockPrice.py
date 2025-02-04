@@ -1,13 +1,13 @@
 import sys
-from stockDAO import fetch_company_code_list
+from stock_dao import StockDAO
 from indicator_calculator import IndicatorCalculator
-from api_handler import call_gemini_api
-from getStockPriceFromYFinance import StockPriceAPI
+from api_handler import ApiHandler
+from accsess_yFinance_for_stockPrice import StockPriceAPI
 
 def analyze_stocks():
     try:
         # 株価コード一覧取得
-        stock_codes = fetch_company_code_list()
+        stock_codes = StockDAO.fetch_company_code_list()
 
         # 各銘柄の分析
         for code in stock_codes:
@@ -30,7 +30,7 @@ def analyze_stocks():
                         上記データから投資判断をお願いします。
                         """
 
-                    analysis = call_gemini_api(prompt)
+                    analysis = ApiHandler.call_gemini_api(prompt)
                     print(f"銘柄 {code} の分析結果:")
                     print(analysis)
                     print("-" * 50)
@@ -45,4 +45,18 @@ def analyze_stocks():
 
 
 if __name__ == "__main__":
-    analyze_stocks()
+    try:
+        dao = StockDAO()
+        stock_codes = dao.fetch_company_code_list()
+        print(stock_codes)
+        stock_code = stock_codes[0]
+        stock_price_api = StockPriceAPI(stock_code)
+        price_data = stock_price_api.fetch_data_yfinance()
+        print(price_data)
+        for price in price_data:
+            dao.insert_stock_price_data(price)
+    except Exception as e:
+        print(f"エラー発生: {e}")
+    finally:
+        dao.close()
+

@@ -3,7 +3,7 @@ import requests
 
 
 class EdinetHandler:
-    def getEdinetData():
+    def get_edinet_data(self):
         api_key = os.environ.get("EDINET_API_KEY")  # 環境変数からAPIキーを取得
         # EDINET API URL
         api_url = "https://api.edinet-fsa.go.jp/api/v2/documents.json"
