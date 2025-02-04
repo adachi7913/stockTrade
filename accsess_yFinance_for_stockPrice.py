@@ -1,23 +1,21 @@
 import yfinance as yf
 from datetime import datetime, timedelta
 
-class StockScraper:
-    def __init__(self, code, fetch_only_flg=False):
+class StockPriceAPI:
+    def __init__(self, code):
         self.code = self._remove_trailing_zero(code)  # 株式コードの末尾のゼロを削除します
-        self.fetch_only_flg = fetch_only_flg
 
     def _remove_trailing_zero(self, code):
         # 株式コードの末尾のゼロを削除します（存在する場合）
         return code[:-1] if code.endswith("0") else code
-
     def fetch_data_yfinance(self):
         # yfinance APIを使用して株価データを取得します
         today = datetime.now()
         one_year_ago = today - timedelta(days=365)
-        test26days_ago = today - timedelta(days=43)
+        # test26days_ago = today - timedelta(days=43)
         
         # yfinanceで日本株のコードには".T"をつける必要があります
-        yf_code = self.code + ".T" 
+        yf_code = self.code + ".T"
         
         print(f"Fetching data for {yf_code} from yfinance API")
         
@@ -36,7 +34,8 @@ class StockScraper:
         # DataFrameから必要なデータを抽出してリストに格納
         for index, row in df.iterrows():
             data.append({
-                "date": index.strftime('%d-%m-%Y'), # 日付の形式をDD-MM-YYYYに変換
+                "code": self.code,
+                "date": index.strftime('%Y%m%d'), # 日付の形式をDD-MM-YYYYに変換
                 "open": (float(row['Open'])),
                 "high": (float(row['High'])),
                 "low": (float(row['Low'])),
@@ -46,3 +45,9 @@ class StockScraper:
         print(f"Successfully fetched {len(data)} days of data from yfinance API.")
         # data.reverse() # リストを反転
         return data
+
+if __name__ == "__main__":
+    stock_code = "7203"
+    stock_price_api = StockPriceAPI(stock_code)
+    price_data = stock_price_api.fetch_data_yfinance()
+    print(price_data)

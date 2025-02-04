@@ -7,7 +7,7 @@ class ApiHandler:
         self.data = data
         self.indicators = indicators
 
-    def getPrompt(self):
+    def get_prompt(self):
         prompt = (
             "あなたはプロのデイトレーダーです。デイトレーダーとは、値動きや指標、ニュースから買い圧力と売り圧力の力量差を洗い出し、予測をたてます。"
             + "私はローリスクで着実に資産を増やしたいと考えています。"
