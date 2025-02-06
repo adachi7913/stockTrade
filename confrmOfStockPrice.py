@@ -54,6 +54,7 @@ if __name__ == "__main__":
         price_data = stock_price_api.fetch_data_yfinance()
         print(price_data)
         for price in price_data:
+            dao.fetch_company_info(stock_code)
             dao.insert_stock_price_data(price)
     except Exception as e:
         print(f"エラー発生: {e}")
