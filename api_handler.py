@@ -45,8 +45,8 @@ class ApiHandler:
         if not api_key:
             print("Error: GEMINI_API_KEY environment variable not set.")
             return "API key not set"  # APIキーがない場合はエラーメッセージを返す
-
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-thinking-exp:generateContent?key={api_key}"
+        model = os.environ.get("GEMINI_MODEL")  # 環境変数からモデル名を取得
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         prompt = self.getPrompt() # getPrompt関数でプロンプトを生成
         payload = {
             "contents": [

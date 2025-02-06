@@ -56,19 +56,20 @@ class IndicatorCalculator:
         if len(closes) >= 20:
             bb_df = ta.bbands(closes, length=20, std=2)
             return {
-                "lower": float(bb_df["BBL_20_2.0"].iloc[-1]) if "BBL_20_2.0" in bb_df.columns else None,
-                "middle": float(bb_df["BBM_20_2.0"].iloc[-1]) if "BBM_20_2.0" in bb_df.columns else None,
-                "upper": float(bb_df["BBU_20_2.0"].iloc[-1]) if "BBU_20_2.0" in bb_df.columns else None,
+                "lower": float(bb_df["BBL_20_2.0"].iloc[-1]) if "BBL_20_2.0" in bb_df.columns else 0,
+                "middle": float(bb_df["BBM_20_2.0"].iloc[-1]) if "BBM_20_2.0" in bb_df.columns else 0,
+                "upper": float(bb_df["BBU_20_2.0"].iloc[-1]) if "BBU_20_2.0" in bb_df.columns else 0,
             }
         else:
-            return 0
-    
+            # データが足りない場合は必ず辞書で返す
+            return {"lower": 0, "middle": 0, "upper": 0}
+
     def calculate_stochastic(self, ohlc_data, high, low, closes):
         if len(ohlc_data) >= 14:
             try:
                 stoch_df = ta.stoch(high=high, low=low, close=closes, k=14, d=3, smooth_k=3)
                 if stoch_df is None or stoch_df.empty or stoch_df["STOCHk_14_3_3"].isnull().all():
-                    return {"stoch_k": None, "stoch_d": None}
+                    return {"stoch_k": 0, "stoch_d": 0}
                 else:
                     return {
                         "stoch_k": float(stoch_df["STOCHk_14_3_3"].iloc[-1]),
@@ -76,10 +77,10 @@ class IndicatorCalculator:
                     }
             except Exception as e:
                 print("Stochastic calculation error:", e)
-                return {"stoch_k": None, "stoch_d": None}
+                return {"stoch_k": 0, "stoch_d": 0}
         else:
-            return 0
-    
+            return {"stoch_k": 0, "stoch_d": 0}
+        
     def calculate_atr(self, ohlc_data, high, low, closes):
         if len(ohlc_data) >= 14:
             atr_series = ta.atr(high=high, low=low, close=closes, length=14)
