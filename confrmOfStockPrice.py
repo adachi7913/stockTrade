@@ -62,10 +62,10 @@ if __name__ == "__main__":
         for price in price_data:
             company_info = dao.fetch_company_info(stock_code)
             print(company_info)
-            industry_name = TableCategory.get_table_prefix(company_info[3]) # 企業名の取得
             print(f"industry_name: {industry_name}")
             dao.insert_stock_price_data(price, industry_name)
             print(f"株価データを挿入しました: {price}")
+        full_data = dao.fetch_full_data(stock_code)
 
     except Exception as e:
         print(f"エラー発生: {e}")

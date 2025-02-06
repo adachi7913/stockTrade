@@ -3,38 +3,57 @@ import os
 import json  # json モジュールをインポート
 
 class ApiHandler:
-    def __init__(self, data, indicators):
-        self.data = data
-        self.indicators = indicators
+    def __init__(self, full_data):
+        self.full_data = full_data
 
     def get_prompt(self):
-        prompt = (
-            "あなたはプロのデイトレーダーです。デイトレーダーとは、値動きや指標、ニュースから買い圧力と売り圧力の力量差を洗い出し、予測をたてます。"
-            + "私はローリスクで着実に資産を増やしたいと考えています。"
-            + "私は現在注目している株について、アドバイスを求めています。"
-            + "私は、ある日本小型株の日足データと指標を持っています。"
-            + "あなたには、エントリー可否判定とトレードルール**のみ**を教えてほしいです。"
-            + "とある日本小型株の日足データと指標を渡しますので、エントリー可否判定とトレードルール**のみ**を、**下記の出力形式を厳守して**返答してください"
-            + "【入力】  "
-            + "・OHLCV日足データ  "
-            + "・指標：1. 一目均衡表 パラメーター: tenkan=9, kijun=26, senkou=52)"
-            +" 2. ADX (Average Directional Index) パラメーター: period=14"
-            +" 3.ストキャスティクス パラメーター: %K=14, %D=3, スローイング=3"
-            +" 4. ボリンジャーバンド パラメーター: length=20, std=2"
-            +" 5. ATR (Average True Range) パラメーター: period=14"
-            + "【出力形式】"
-            + "  [エントリー可否]**可能/不可**"
-            + "  [理由]**ここに理由を出力**"
-            + "  [ルール]（可の場合）  "
-            + "・Entry価格帯  "
-            + "・SL価格  "
-            + "・利確目標  "
-            + "・推奨保有期間  "
-            + "【OHLCV日足データ】"
-            + json.dumps(self.data, ensure_ascii=False)  # json.dumps() を使用、ensure_ascii=False で日本語を正しく表示
-            + "【指標】"
-            + json.dumps(self.indicators, ensure_ascii=False)  # json.dumps() を使用、ensure_ascii=False で日本語を正しく表示
-        )
+        prompt = f"""
+    あなたは優秀な個人投資家であり、短期スウィングトレードに精通しています。
+    市場動向、各種インジケーター、そして株価の推移をもとに、エントリーの可否と最適なトレード戦略を構築してください。
+    私は低リスクで着実に資産を増やす投資戦略を志向しています。
+
+    今回は、DBから取得した過去1年間分の株価データと各インジケーターを統合した情報を提供します。
+    各レコードは、以下の構成になっています：
+
+    　{{
+    　　　"code": 株式コード,
+    　　　"date": "YYYYMMDD形式の日付",
+    　　　"open": 始値,
+    　　　"high": 高値,
+    　　　"low": 安値,
+    　　　"close": 終値,
+    　　　"volume": 出来高,
+    　　　"ichimoku": {{
+    　　　　"tenkan": 転換線,
+    　　　　"kijun": 基準線,
+    　　　　"senkou_a": 先行スパンA,
+    　　　　"senkou_b": 先行スパンB
+    　　　}},
+    　　　"adx": ADX,
+    　　　"bb": {{
+    　　　　"lower": ボリンジャーバンド下限,
+    　　　　"middle": ボリンジャーバンド中央値,
+    　　　　"upper": ボリンジャーバンド上限
+    　　　}},
+    　　　"stoch": {{
+    　　　　"stoch_k": ストキャスティクス%K,
+    　　　　"stoch_d": ストキャスティクス%D
+    　　　}},
+    　　　"atr": ATR
+    　}}
+
+    【提供データ】
+    {json.dumps(self.full_data, ensure_ascii=False)}
+
+    【出力形式】
+    [エントリー可否] **可能/不可**
+    [理由] **ここに理由を記述**
+    [ルール] （エントリー可能な場合）
+    　・Entry価格帯
+    　・SL価格
+    　・利確目標
+    　・推奨保有期間
+        """
         return prompt
 
     def call_gemini_api(self):

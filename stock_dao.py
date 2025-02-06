@@ -1,5 +1,6 @@
 import psycopg
 from dotenv import load_dotenv
+from datetime import date, timedelta
 import os
 import sys
 
@@ -199,6 +200,125 @@ class StockDAO:
             self.conn.commit()
         except Exception as e:
             print(f"エラー発生: {e}")    
+    
+
+    def get_stock_full_data_period(self,stock_code, industry_name):
+        stock_code = stock_code[:-1] if stock_code.endswith("0") else stock_code
+        """
+        株価コードと業種名を引数に、DBから現在から1年前までのデータを配列で取得し、
+        以下の構成でレスポンスする:
+
+        {
+            'code': '1301',
+            'date': 'yyyymmdd',
+            'open': xxxx,
+            'high': xxxx,
+            'low': xxxx,
+            'close': xxxx,
+            'volume': xxxx,
+            'ichimoku': {
+                'tenkan': xxxx,
+                'kijun': xxxx,
+                'senkou_a': xxxx,
+                'senkou_b': xxxx
+            },
+            'adx': xxxx,
+            'bb': {
+                'lower': xxxx,
+                'middle': xxxx,
+                'upper': xxxx
+            },
+            'stoch': {
+                'stoch_k': xxxx,
+                'stoch_d': xxxx
+            },
+            'atr': xxxx
+        }
+
+        ※期間は「現在の日付」から「1年前」まで（日付型で直接比較）とします。
+        """
+        # レスポンス用の配列に、各行を必要な構成の辞書に変換
+        try:
+            results = []    
+            # テーブル名の動的生成
+            price_table = f"{industry_name}_price"
+            indicator_table = f"{industry_name}_indicator"
+                
+            # 期間設定：本日から1年前まで
+            today = date.today()
+            one_year_ago = today - timedelta(days=365)
+                
+            # SQL：価格テーブルと指標テーブルをcode, dateで結合
+            query = f"""
+                SELECT
+                    p.code,
+                    to_char(p.date, 'YYYYMMDD') AS date,
+                    p.open, p.high, p.low, p.close, p.volume,
+                    i.ichimoku_tenkan, i.ichimoku_kijun, i.ichimoku_senkou_a, i.ichimoku_senkou_b,
+                    i.adx,
+                    i.bb_lower, i.bb_middle, i.bb_upper,
+                    i.stoch_k, i.stoch_d,
+                    i.atr
+                FROM {price_table} p
+                INNER JOIN {indicator_table} i ON p.code = i.code AND p.date = i.date
+                WHERE p.code = %(code)s
+                AND p.date BETWEEN %(start_date)s AND %(end_date)s
+                ORDER BY p.date ASC;
+            """
+                
+            self.cur.execute(query, {
+                "code": stock_code,
+                "start_date": one_year_ago,
+                "end_date": today
+            })
+            rows = self.cur.fetchall()
+                
+            if not rows:
+                print("該当するデータが見つかりません。")
+                return []
+                
+            
+            for row in rows:
+                # rowの順番:
+                # 0: code, 1: date, 2: open, 3: high, 4: low, 5: close, 6: volume,
+                # 7: ichimoku_tenkan, 8: ichimoku_kijun, 9: ichimoku_senkou_a, 10: ichimoku_senkou_b,
+                # 11: adx, 12: bb_lower, 13: bb_middle, 14: bb_upper,
+                # 15: stoch_k, 16: stoch_d, 17: atr
+                record = {
+                    "code": row[0],
+                    "date": row[1],
+                    "open": row[2],
+                    "high": row[3],
+                    "low": row[4],
+                    "close": row[5],
+                    "volume": row[6],
+                    "ichimoku": {
+                        "tenkan": row[7],
+                        "kijun": row[8],
+                        "senkou_a": row[9],
+                        "senkou_b": row[10]
+                    },
+                    "adx": row[11],
+                    "bb": {
+                        "lower": row[12],
+                        "middle": row[13],
+                        "upper": row[14]
+                    },
+                    "stoch": {
+                        "stoch_k": row[15],
+                        "stoch_d": row[16]
+                    },
+                    "atr": row[17]
+                }
+                results.append(record)
+                
+            return results
+            
+        except Exception as e:
+            print(f"DB取得エラー: {e}")
+            return []
+
+
     def close(self):
         """クローズ処理をまとめたメソッド"""
         try:
