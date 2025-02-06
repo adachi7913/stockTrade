@@ -91,18 +91,9 @@ class StockDAO:
             if 'conn' in locals():
                 self.conn.close()
 
-    def insert_stock_price_data(self,code,stock_price_data):
-        """株価データの挿入"""
-        upsert_query = """
-        INSERT INTO stock_prices (code, date, open, high, low, close, volume)
-        VALUES (%(Code)s, %(Date)s, %(Open)s, %(High)s, %(Low)s, %(Close)s, %(Volume)s)
-        ON CONFLICT (code, date) DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, close = EXCLUDED.close, volume = EXCLUDED.volume;
-        """
-        self.cur.execute(upsert_query, code,stock_price_data)
-
-
-                
+               
     def insert_stock_price_data(self, stock_price_data):
+        industry_name = "test";
         """
         株価データの挿入または更新
         stock_price_dataは以下のキーを含む辞書である必要があります:
@@ -127,7 +118,7 @@ class StockDAO:
             close = EXCLUDED.close,
             volume = EXCLUDED.volume;
         """
-        self.cur.execute(upsert_query, stock_price_data)
+        self.cur.execute(upsert_query, stock_price_data,{"industry_name":industry_name})
                     
     def close(self):
         """クローズ処理をまとめたメソッド"""
@@ -139,14 +130,17 @@ class StockDAO:
         except Exception as e:
             print(f"クローズ時エラー: {e}")
             
-    def get_company_info(self, code):
+    def fetch_company_info(self, code):
+        code = code + "0" # 会社情報取得時は末尾の0を追加
         select_query = """
         SELECT * FROM companies WHERE code = %(code)s
         """
-        self.cur.execute(select_query, code)
-        return self.cur.fetchall()
+        self.cur.execute(select_query, {"code":code})
+        return self.cur.fetchall()[0] # 1件のみ取得
 
 
 if __name__ == "__main__":
-    company_code_list = StockDAO.fetch_company_code_list()
-    print(company_code_list)
+    dao = StockDAO()
+    company_info = dao.fetch_company_info("7203")
+    print("company_info:", company_info)
+    print("indutrty_name:", company_info[3])

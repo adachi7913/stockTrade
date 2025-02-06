@@ -9,7 +9,7 @@ if __name__ == "__main__":
     # from accsessEdinet import EdinetHandler  # edinet_handler.py から EdinetHandler をインポート
     # EdinetHandler.getEdinetData()
     import os
-    from getStockPriceFromYFinance import (
+    from accsess_yFinance_for_stockPrice import (
         StockScraper,
     )  # data_scraper.py から StooqScraper をインポート
     from indicator_calculator import (
