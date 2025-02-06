@@ -3,6 +3,7 @@ from stock_dao import StockDAO
 from indicator_calculator import IndicatorCalculator
 from api_handler import ApiHandler
 from accsess_yFinance_for_stockPrice import StockPriceAPI
+from table_category import TableCategory
 
 def analyze_stocks():
     try:
@@ -49,13 +50,23 @@ if __name__ == "__main__":
         dao = StockDAO()
         stock_codes = dao.fetch_company_code_list()
         print(stock_codes)
-        stock_code = stock_codes[0]
+        stock_code = stock_codes[1]
         stock_price_api = StockPriceAPI(stock_code)
         price_data = stock_price_api.fetch_data_yfinance()
-        print(price_data)
+        indi_instance = IndicatorCalculator(price_data)
+        indicator = indi_instance.get_indicators()
+        
+        company_info = dao.fetch_company_info(stock_code)
+        industry_name = TableCategory.get_table_prefix(company_info[3]) # 企業名の取得
+        dao.insert_indicator_data(indicator, stock_code, industry_name)
         for price in price_data:
-            dao.fetch_company_info(stock_code)
-            dao.insert_stock_price_data(price)
+            company_info = dao.fetch_company_info(stock_code)
+            print(company_info)
+            industry_name = TableCategory.get_table_prefix(company_info[3]) # 企業名の取得
+            print(f"industry_name: {industry_name}")
+            dao.insert_stock_price_data(price, industry_name)
+            print(f"株価データを挿入しました: {price}")
+
     except Exception as e:
         print(f"エラー発生: {e}")
     finally:
