@@ -30,7 +30,8 @@ class IndicatorCalculator:
     def prepare_ohlc_data(self, current_date_data):
         ohlc_data = pd.DataFrame(current_date_data)
         ohlc_data.drop_duplicates(inplace=True)
-        ohlc_data["date"] = pd.to_datetime(ohlc_data["date"], dayfirst=True)
+        # print("ohlc_data:", ohlc_data)
+        ohlc_data["date"] = pd.to_datetime(ohlc_data["date"], format="%Y%m%d",dayfirst=True)
         return ohlc_data
     
     def extract_series(self, ohlc_data):
@@ -99,24 +100,24 @@ def calculate_ichimoku(high, low):
     # 先行スパンBのデバッグ
     senkou_b_high = high.rolling(window=52).max()
     senkou_b_low = low.rolling(window=52).min()
-    print("\nsenkou_b_high head:")
-    print(senkou_b_high.head())
-    print("\nsenkou_b_low head:")
-    print(senkou_b_low.head())
+    # print("\nsenkou_b_high head:")
+    # print(senkou_b_high.head())
+    # print("\nsenkou_b_low head:")
+    # print(senkou_b_low.head())
 
     # 先行スパンB計算
     senkou_b = (senkou_b_high + senkou_b_low) / 2
 
     # シフト前の値を確認
-    print("\nsenkou_b before shift:")
-    print(senkou_b.tail())
+    # print("\nsenkou_b before shift:")
+    # print(senkou_b.tail())
 
     # シフト処理（26日先行）
     senkou_b = senkou_b.shift(26)
 
     # シフト後の値を確認
-    print("\nsenkou_b after shift:")
-    print(senkou_b.tail())
+    # print("\nsenkou_b after shift:")
+    # print(senkou_b.tail())
 
     # 転換線 = (n日間の高値 + n日間の安値) / 2
     tenkan_high = high.rolling(window=9).max()
@@ -140,7 +141,7 @@ def calculate_ichimoku(high, low):
     senkou_b = senkou_b.shift(26)
 
     # 計算結果の確認
-    print(f"senkou_b values:\n{senkou_b.tail()}")
+    # print(f"senkou_b values:\n{senkou_b.tail()}")
 
     return {
         "tenkan": float(tenkan.iloc[-1]) if not pd.isna(tenkan.iloc[-1]) else 0,

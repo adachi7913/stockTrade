@@ -318,6 +318,7 @@ class StockDAO:
             print(f"DB取得エラー: {e}")
             return []
 
+    
 
     def close(self):
         """クローズ処理をまとめたメソッド"""
@@ -340,6 +341,45 @@ class StockDAO:
         except Exception as e:
             print(f"エラー発生: {e}")
             return None
+
+    def insert_api_response(self, response_data):
+        """
+        APIレスポンスのデータを挿入または更新するメソッド
+        
+        response_data は以下のキーを含む辞書である必要があります:
+          - date: 日付 (例: "2023-10-12") ※ YYYY-MM-DD 形式
+          - code: 証券コード (例: "7203")
+          - close: 前日の終値 (例: 1500.25)
+          - isEntry: エントリー可否 (例: "可能" または "不可")
+          - reason: エントリー判断の理由 (例: "株価がボリンジャーバンド下限に接近しているため")
+          - rule_entry_price: エントリー価格帯 (例: "1360-1370")
+          - rule_stop_limit: SL価格 (例: "1330")
+          - rule_top_price: 利確目標 (例: "1390-1395")
+          - rule_period: 推奨保有期間 (例: "数日～1週間")
+        """
+        query = """
+        INSERT INTO api_response (
+            date, code, close, isEntry, reason, 
+            rule_entry_price, rule_stop_limit, rule_top_price, rule_period
+        ) VALUES (
+            %(date)s, %(code)s, %(close)s, %(isEntry)s, %(reason)s, 
+            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s
+        )
+        ON CONFLICT (date, code) DO UPDATE SET
+            close = EXCLUDED.close,
+            isEntry = EXCLUDED.isEntry,
+            reason = EXCLUDED.reason,
+            rule_entry_price = EXCLUDED.rule_entry_price,
+            rule_stop_limit = EXCLUDED.rule_stop_limit,
+            rule_top_price = EXCLUDED.rule_top_price,
+            rule_period = EXCLUDED.rule_period;
+        """
+        
+        try:
+            self.cur.execute(query, response_data)
+            self.conn.commit()
+        except Exception as e:
+            print("APIレスポンスのデータ挿入エラー:", e)
 
 
 if __name__ == "__main__":

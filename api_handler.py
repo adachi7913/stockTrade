@@ -1,58 +1,69 @@
 import requests
 import os
 import json  # json モジュールをインポート
+import re
+from decimal import Decimal
 
 class ApiHandler:
-    def __init__(self, full_data):
-        self.full_data = full_data
+    def __init__(self, data):
+        self.data = data
 
     def get_prompt(self):
+        # Convert Decimal values in self.data to float
+        def convert_decimals(obj):
+            if isinstance(obj, dict):
+                return {k: convert_decimals(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_decimals(item) for item in obj]
+            elif isinstance(obj, Decimal):
+                return float(obj)
+            return obj
+
+        data_converted = convert_decimals(self.data)
+        
         prompt = f"""
-    あなたは優秀な個人投資家であり、短期スウィングトレードに精通しています。
-    市場動向、各種インジケーター、そして株価の推移をもとに、エントリーの可否と最適なトレード戦略を構築してください。
-    私は低リスクで着実に資産を増やす投資戦略を志向しています。
+        [Premise] Think in English and answer in Japanese.
+        [Content]
+        You are a skilled individual investor with expertise in short-term swing trading.
+        Based on market trends, various indicators, and stock price movements, please decide whether to enter a position and devise an optimal trading strategy.
+        My investment strategy focuses on steadily increasing assets with low risk.
+            
+        In this case, I will provide the stock price data from the past year along with various indicators (the data structure is as follows).
+        Each record is structured as:
 
-    今回は、DBから取得した過去1年間分の株価データと各インジケーターを統合した情報を提供します。
-    各レコードは、以下の構成になっています：
+        {{
+            "code": Stock code,
+            "date": "Date in YYYYMMDD format",
+            "open": Opening price,
+            "high": High price,
+            "low": Low price,
+            "close": Closing price,
+            "volume": Volume,
+            "ichimoku": {{
+                "tenkan": Tenkan-sen,
+                "kijun": Kijun-sen,
+                "senkou_a": Senkou Span A,
+                "senkou_b": Senkou Span B
+            }},
+            "adx": ADX,
+            "bb": {{
+                "lower": Bollinger Band Lower,
+                "middle": Bollinger Band Middle,
+                "upper": Bollinger Band Upper
+            }},
+            "stoch": {{
+                "stoch_k": Stochastic %K,
+                "stoch_d": Stochastic %D
+            }},
+            "atr": ATR
+        }}
 
-    　{{
-    　　　"code": 株式コード,
-    　　　"date": "YYYYMMDD形式の日付",
-    　　　"open": 始値,
-    　　　"high": 高値,
-    　　　"low": 安値,
-    　　　"close": 終値,
-    　　　"volume": 出来高,
-    　　　"ichimoku": {{
-    　　　　"tenkan": 転換線,
-    　　　　"kijun": 基準線,
-    　　　　"senkou_a": 先行スパンA,
-    　　　　"senkou_b": 先行スパンB
-    　　　}},
-    　　　"adx": ADX,
-    　　　"bb": {{
-    　　　　"lower": ボリンジャーバンド下限,
-    　　　　"middle": ボリンジャーバンド中央値,
-    　　　　"upper": ボリンジャーバンド上限
-    　　　}},
-    　　　"stoch": {{
-    　　　　"stoch_k": ストキャスティクス%K,
-    　　　　"stoch_d": ストキャスティクス%D
-    　　　}},
-    　　　"atr": ATR
-    　}}
-
-    【提供データ】
-    {json.dumps(self.full_data, ensure_ascii=False)}
-
-    【出力形式】
-    [エントリー可否] **可能/不可**
-    [理由] **ここに理由を記述**
-    [ルール] （エントリー可能な場合）
-    　・Entry価格帯
-    　・SL価格
-    　・利確目標
-    　・推奨保有期間
+        [Provided Data]
+        {json.dumps(data_converted, ensure_ascii=False)}
+        The output format is as follows. Please adhere strictly to a Python dictionary format and include nothing else in your answer:
+        [Output Format]
+        {{isEntry:**OK/Not Possible**, reason:**Reason**, rule:{{entryPrice:**Entry Price Range**, sl:**Stop Loss Price**, tp:**Take Profit Target**, period:**Recommended Holding Period**}}}}
+        
         """
         return prompt
 
@@ -66,7 +77,7 @@ class ApiHandler:
             return "API key not set"  # APIキーがない場合はエラーメッセージを返す
         model = os.environ.get("GEMINI_MODEL")  # 環境変数からモデル名を取得
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        prompt = self.getPrompt() # getPrompt関数でプロンプトを生成
+        prompt = self.get_prompt() # getPrompt関数でプロンプトを生成
         payload = {
             "contents": [
                 {
@@ -82,11 +93,33 @@ class ApiHandler:
             response = requests.post(api_url, json=payload, headers=headers)
             response.raise_for_status()
             json_response = response.json()
+            print("API response:", json_response)
+            
             # Gemini APIからのレスポンスを処理します
-            if json_response and 'candidates' in json_response and json_response['candidates']:
-                return json_response['candidates'][0].get('content', "No content found")
-            else:
-                return "No prediction found or invalid API response" # レスポンスが不正な場合のエラーメッセージを追加
+            # if json_response and 'candidates' in json_response and json_response['candidates']:
+            #     content = json_response['candidates'][0]['content']['parts']['text']
+            try:
+                # usageMetadataからトークン情報をログ出力する
+                usage = json_response.get("usageMetadata", {})
+                print("入力トークン(promptTokenCount):", usage.get("promptTokenCount", "不明"))
+                print("候補トークン(candidatesTokenCount):", usage.get("candidatesTokenCount", "不明"))
+                print("合計トークン(totalTokenCount):", usage.get("totalTokenCount", "不明"))
+                content = json_response['candidates'][0]['content']['parts'][0]['text']
+                # マークダウン記法の ```json ... ``` を削除する
+                if isinstance(content, dict):
+                    content = json.dumps(content, ensure_ascii=False)
+                match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
+                if match:
+                    json_text = match.group(1)
+                else:
+                    json_text = content
+                    
+                return json_text
+            except Exception as e:
+                print("JSON parse error:", e)
+                return {"error": "JSON parse error", "raw": json_response['candidates'][0]['content']}
+            # else:
+            #     return {"error": "No prediction found or invalid API response"}
         except requests.RequestException as e:
             print(f"Gemini API call failed: {e}, request: {e.request}, response: {e.response}")
             return f"Gemini API call failed: {e}"

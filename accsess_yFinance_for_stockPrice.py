@@ -17,7 +17,7 @@ class StockPriceAPI:
         # yfinanceで日本株のコードには".T"をつける必要があります
         yf_code = self.code + ".T"
         
-        print(f"Fetching data for {yf_code} from yfinance API")
+        # print(f"Fetching data for {yf_code} from yfinance API")
         
         # 期間を指定して株価データを取得
         ticker = yf.Ticker(yf_code)
@@ -25,7 +25,7 @@ class StockPriceAPI:
         # df = ticker.history(start=test26days_ago, end=today)
 
         # df.sort_index(inplace=True) # 日付でソート
-        print(f"df.index.is_monotonic_increasing: {df.index.is_monotonic_increasing}") # インデックスが日付順にソートされているか確認
+        # print(f"df.index.is_monotonic_increasing: {df.index.is_monotonic_increasing}") # インデックスが日付順にソートされているか確認
         df.fillna(0, inplace=True) # 欠損値を0で埋める
         if df.empty:
             raise ValueError(f"No data retrieved for code {yf_code} from yfinance API.")
@@ -42,8 +42,7 @@ class StockPriceAPI:
                 "close": (float(row['Close'])),
                 "volume": int(row['Volume'])
             })
-        print(f"Successfully fetched {len(data)} days of data from yfinance API.")
-        # data.reverse() # リストを反転
+        # print(f"Successfully fetched {len(data)} days of data from yfinance API.")
         return data
 
 if __name__ == "__main__":
