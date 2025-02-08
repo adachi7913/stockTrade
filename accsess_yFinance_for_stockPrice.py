@@ -10,43 +10,47 @@ class StockPriceAPI:
         return code[:-1] if code.endswith("0") else code
     def fetch_data_yfinance(self):
         # yfinance APIを使用して株価データを取得します
-        today = datetime.now()
-        one_year_ago = today - timedelta(days=365)
-        # test26days_ago = today - timedelta(days=43)
-        
-        # yfinanceで日本株のコードには".T"をつける必要があります
-        yf_code = self.code + ".T"
-        
-        # print(f"Fetching data for {yf_code} from yfinance API")
-        
-        # 期間を指定して株価データを取得
-        ticker = yf.Ticker(yf_code)
-        df = ticker.history(start=one_year_ago, end=today)
-        # df = ticker.history(start=test26days_ago, end=today)
+        try:
+            today = datetime.now()
+            one_year_ago = today - timedelta(days=365)
+            # test26days_ago = today - timedelta(days=43)
+            
+            # yfinanceで日本株のコードには".T"をつける必要があります
+            yf_code = self.code + ".T"
+            
+            # print(f"Fetching data for {yf_code} from yfinance API")
+            
+            # 期間を指定して株価データを取得
+            ticker = yf.Ticker(yf_code)
+            df = ticker.history(start=one_year_ago, end=today)
+            # df = ticker.history(start=test26days_ago, end=today)
 
-        # df.sort_index(inplace=True) # 日付でソート
-        # print(f"df.index.is_monotonic_increasing: {df.index.is_monotonic_increasing}") # インデックスが日付順にソートされているか確認
-        df.fillna(0, inplace=True) # 欠損値を0で埋める
-        if df.empty:
-            raise ValueError(f"No data retrieved for code {yf_code} from yfinance API.")
+            # df.sort_index(inplace=True) # 日付でソート
+            # print(f"df.index.is_monotonic_increasing: {df.index.is_monotonic_increasing}") # インデックスが日付順にソートされているか確認
+            df.fillna(0, inplace=True) # 欠損値を0で埋める
+            if df.empty:
+                raise ValueError(f"No data retrieved for code {yf_code} from yfinance API.")
 
-        data = []
-        # DataFrameから必要なデータを抽出してリストに格納
-        for index, row in df.iterrows():
-            data.append({
-                "code": self.code,
-                "date": index.strftime('%Y%m%d'), # 日付の形式をDD-MM-YYYYに変換
-                "open": (float(row['Open'])),
-                "high": (float(row['High'])),
-                "low": (float(row['Low'])),
-                "close": (float(row['Close'])),
-                "volume": int(row['Volume'])
-            })
+            data = []
+            # DataFrameから必要なデータを抽出してリストに格納
+            for index, row in df.iterrows():
+                data.append({
+                    "code": self.code,
+                    "date": index.strftime('%Y%m%d'), # 日付の形式をDD-MM-YYYYに変換
+                    "open": (float(row['Open'])),
+                    "high": (float(row['High'])),
+                    "low": (float(row['Low'])),
+                    "close": (float(row['Close'])),
+                    "volume": int(row['Volume'])
+                })                
         # print(f"Successfully fetched {len(data)} days of data from yfinance API.")
-        return data
+            return data
+        except Exception as e:
+            print(f"Error fetching data for {self.code} from yfinance API: {e}")
+            return None
 
 if __name__ == "__main__":
-    stock_code = "7203"
+    stock_code = "1451"
     stock_price_api = StockPriceAPI(stock_code)
     price_data = stock_price_api.fetch_data_yfinance()
     print(price_data)
