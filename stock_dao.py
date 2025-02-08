@@ -35,7 +35,8 @@ class StockDAO:
                 %(Sector17Code)s, %(Sector17CodeName)s, %(MarketCode)s, %(MarketCodeName)s,
                 %(ScaleCategory)s, %(Sector33Code)s, %(Sector33CodeName)s
             )
-            ON CONFLICT (code, date) DO UPDATE SET
+            ON CONFLICT (code) DO UPDATE SET
+                date = EXCLUDED.date,
                 company_name = EXCLUDED.company_name,
                 company_name_en = EXCLUDED.company_name_en,
                 industry_code = EXCLUDED.industry_code,
@@ -365,7 +366,8 @@ class StockDAO:
             %(date)s, %(code)s, %(close)s, %(isEntry)s, %(reason)s, 
             %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s
         )
-        ON CONFLICT (date, code) DO UPDATE SET
+        ON CONFLICT (code) DO UPDATE SET
+            date = EXCLUDED.date,
             close = EXCLUDED.close,
             isEntry = EXCLUDED.isEntry,
             reason = EXCLUDED.reason,
@@ -380,6 +382,24 @@ class StockDAO:
             self.conn.commit()
         except Exception as e:
             print("APIレスポンスのデータ挿入エラー:", e)
+    
+    def fetch_ok_api_responses(self):
+        """
+        api_response テーブルから isEntry が "OK" のレコードのみを取得するメソッド
+        戻り値は取得したレコードのリスト（タプルのリスト）です。
+        """
+        query = """
+        SELECT *
+        FROM api_response
+        WHERE isEntry = 'OK';
+        """
+        try:
+            self.cur.execute(query)
+            records = self.cur.fetchall()
+            return records
+        except Exception as e:
+            print("api_responseテーブルからOKのレコード取得エラー:", e)
+            return []
 
 
 if __name__ == "__main__":

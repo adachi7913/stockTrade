@@ -22,49 +22,51 @@ class ApiHandler:
         data_converted = convert_decimals(self.data)
         
         prompt = f"""
-        [Premise] Think in English and answer in Japanese.
-        [Content]
-        You are a skilled individual investor with expertise in short-term swing trading.
-        Based on market trends, various indicators, and stock price movements, please decide whether to enter a position and devise an optimal trading strategy.
-        My investment strategy focuses on steadily increasing assets with low risk.
-            
-        In this case, I will provide the stock price data from the past year along with various indicators (the data structure is as follows).
-        Each record is structured as:
+【前提】英語で思考し、**日本語のみ**で回答してください。
+    【内容】
+    あなたは優秀な個人投資家であり、短期スウィングトレードに精通しています。
+    市場動向、各種インジケーター、そして株価の推移をもとに、エントリーの可否と最適なトレード戦略を構築してください。
+    エントリー可否の判断は、以下のルールに従ってください:
+    ・エントリー可否は、**可能/不可**のいずれかで回答してください。
+    ・リスクリワードが1.5以上の場合のみエントリー可能とします。
 
-        {{
-            "code": Stock code,
-            "date": "Date in YYYYMMDD format",
-            "open": Opening price,
-            "high": High price,
-            "low": Low price,
-            "close": Closing price,
-            "volume": Volume,
-            "ichimoku": {{
-                "tenkan": Tenkan-sen,
-                "kijun": Kijun-sen,
-                "senkou_a": Senkou Span A,
-                "senkou_b": Senkou Span B
-            }},
-            "adx": ADX,
-            "bb": {{
-                "lower": Bollinger Band Lower,
-                "middle": Bollinger Band Middle,
-                "upper": Bollinger Band Upper
-            }},
-            "stoch": {{
-                "stoch_k": Stochastic %K,
-                "stoch_d": Stochastic %D
-            }},
-            "atr": ATR
-        }}
+    今回は、DBから取得した過去1年間分の株価データと各インジケーター（以下がそのデータ構造）を提供します。
+    各レコードは、次の構成になっています:
 
-        [Provided Data]
-        {json.dumps(data_converted, ensure_ascii=False)}
-        The output format is as follows. Please adhere strictly to a Python dictionary format and include nothing else in your answer:
-        [Output Format]
-        {{isEntry:**OK/Not Possible**, reason:**Reason**, rule:{{entryPrice:**Entry Price Range**, sl:**Stop Loss Price**, tp:**Take Profit Target**, period:**Recommended Holding Period**}}}}
-        
-        """
+    　{{
+    　　　"code": 株式コード,
+    　　　"date": "YYYYMMDD形式の日付",
+    　　　"open": 始値,
+    　　　"high": 高値,
+    　　　"low": 安値,
+    　　　"close": 終値,
+    　　　"volume": 出来高,
+    　　　"ichimoku": {{
+    　　　　"tenkan": 転換線,
+    　　　　"kijun": 基準線,
+    　　　　"senkou_a": 先行スパンA,
+    　　　　"senkou_b": 先行スパンB
+    　　　}},
+    　　　"adx": ADX,
+    　　　"bb": {{
+    　　　　"lower": ボリンジャーバンド下限,
+    　　　　"middle": ボリンジャーバンド中央値,
+    　　　　"upper": ボリンジャーバンド上限
+    　　　}},
+    　　　"stoch": {{
+    　　　　"stoch_k": ストキャスティクス%K,
+    　　　　"stoch_d": ストキャスティクス%D
+    　　　}},
+    　　　"atr": ATR
+    　}}
+
+
+    【提供データ】
+    {json.dumps(data_converted, ensure_ascii=False)}
+    出力形式は下記です。**Pythonの辞書型を厳守**し、その他の内容は回答に含めないでください。:
+    【出力形式】
+    {{isEntry:**可能/不可**, reason:**理由**, rule:{{entryPrice:**Entry価格帯**, sl:**SL価格**, tp:**利確目標**, period:**推奨保有期間**}}}}
+    """
         return prompt
 
     def call_gemini_api(self):
@@ -93,7 +95,7 @@ class ApiHandler:
             response = requests.post(api_url, json=payload, headers=headers)
             response.raise_for_status()
             json_response = response.json()
-            print("API response:", json_response)
+            # print("API response:", json_response)
             
             # Gemini APIからのレスポンスを処理します
             # if json_response and 'candidates' in json_response and json_response['candidates']:
@@ -123,3 +125,5 @@ class ApiHandler:
         except requests.RequestException as e:
             print(f"Gemini API call failed: {e}, request: {e.request}, response: {e.response}")
             return f"Gemini API call failed: {e}"
+    
+    

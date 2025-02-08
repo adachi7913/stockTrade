@@ -76,8 +76,8 @@ class IndicatorCalculator:
                         "stoch_k": float(stoch_df["STOCHk_14_3_3"].iloc[-1]),
                         "stoch_d": float(stoch_df["STOCHd_14_3_3"].iloc[-1]),
                     }
-            except Exception as e:
-                print("Stochastic calculation error:", e)
+            except Exception:
+                # print("Stochastic calculation error:", e)
                 return {"stoch_k": 0, "stoch_d": 0}
         else:
             return {"stoch_k": 0, "stoch_d": 0}

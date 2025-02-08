@@ -98,10 +98,14 @@ if __name__ == "__main__":
     try:
         dao = StockDAO()
         stock_codes = dao.fetch_company_code_list()
-        stock_codes = stock_codes[68:] # 0-68はすでに取得済み
+        # stock_codes = stock_codes[68:] # 0-68はすでに取得済み
+        # stock_codes = stock_codes[216:] # 0-216はすでに取得済み
+        stock_codes = stock_codes[370:] # 0-370はすでに取得済み
         # print(stock_codes)
         # stock_code = stock_codes[10]
         for stock_code in stock_codes:
+            if stock_code != "27530":
+                continue
             stock_price_api = StockPriceAPI(stock_code)
             price_data = stock_price_api.fetch_data_yfinance()
             if not price_data:

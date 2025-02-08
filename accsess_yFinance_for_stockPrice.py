@@ -1,3 +1,4 @@
+import os
 import yfinance as yf
 from datetime import datetime, timedelta
 
@@ -12,7 +13,7 @@ class StockPriceAPI:
         # yfinance APIを使用して株価データを取得します
         try:
             today = datetime.now()
-            one_year_ago = today - timedelta(days=365)
+            fetch_data_range = today - timedelta(days=os.environ.get("FETCH_DATA_RANGE", 1) * 365)
             # test26days_ago = today - timedelta(days=43)
             
             # yfinanceで日本株のコードには".T"をつける必要があります
@@ -22,7 +23,7 @@ class StockPriceAPI:
             
             # 期間を指定して株価データを取得
             ticker = yf.Ticker(yf_code)
-            df = ticker.history(start=one_year_ago, end=today)
+            df = ticker.history(start=fetch_data_range, end=today)
             # df = ticker.history(start=test26days_ago, end=today)
 
             # df.sort_index(inplace=True) # 日付でソート
@@ -50,7 +51,7 @@ class StockPriceAPI:
             return None
 
 if __name__ == "__main__":
-    stock_code = "1451"
+    stock_code = "2753"
     stock_price_api = StockPriceAPI(stock_code)
     price_data = stock_price_api.fetch_data_yfinance()
     print(price_data)
