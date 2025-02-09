@@ -3,11 +3,14 @@ import os
 import re
 import sys
 import time
+
 from dao.stock_dao import StockDAO
 from lib.indicator_calculator import IndicatorCalculator
 from Gemini.api_handler import ApiHandler
 from lib.accsess_yFinance_for_stockPrice import StockPriceAPI
+from lib.parse_response import perse_response
 from lib.table_category import TableCategory
+
 
 def analyze_stocks():
     try:
@@ -47,57 +50,7 @@ def analyze_stocks():
     except Exception as e:
         print(f"実行エラー: {e}")
         return None
-    
-def perse_response(full_data, gemini_result):
-    if not full_data:
-        print("株価データが空のため、処理をスキップします。")
-        return None
-    last_record = full_data[-1]
-    insert_response = {
-        "date": last_record["date"],
-        "code": last_record["code"],
-        "close": last_record["close"],
-    }
-    
-    if isinstance(gemini_result, dict):
-        # 辞書型の場合はそのまま各項目を取得
-        insert_response["isEntry"] = gemini_result.get("isEntry", "")
-        insert_response["reason"] = gemini_result.get("reason", "")
-        rule = gemini_result.get("rule", {})
-        insert_response["rule_entry_price"] = rule.get("entryPrice", "")
-        insert_response["rule_stop_limit"] = rule.get("sl", "")
-        insert_response["rule_top_price"] = rule.get("tp", "")
-        insert_response["rule_period"] = rule.get("period", "")
-    elif isinstance(gemini_result, str):
-        # 文字列の場合：先頭に「【出力形式】」があれば削除
-        response_text = gemini_result.strip()
-        if response_text.startswith("【出力形式】"):
-            response_text = response_text.split("\n", 1)[-1]
-        # コードブロック（pythonまたはjson）の内容を抽出する
-        match = re.search(r"```(?:python|json)?\s*(.*?)\s*```", response_text, re.DOTALL)
-        if match:
-            json_text = match.group(1)
-        else:
-            json_text = response_text
-        try:
-            parsed = json.loads(json_text)
-            insert_response["isEntry"] = parsed.get("isEntry", "")
-            insert_response["reason"] = parsed.get("reason", "")
-            rule = parsed.get("rule", {})
-            insert_response["rule_entry_price"] = rule.get("entryPrice", "")
-            insert_response["rule_stop_limit"] = rule.get("sl", "")
-            insert_response["rule_top_price"] = rule.get("tp", "")
-            insert_response["rule_period"] = rule.get("period", "")
-        except Exception as e:
-            print("APIレスポンスのパースに失敗しました:", e)
-            # パースに失敗した場合は、そのまま生テキストをreasonとして格納する
-            insert_response["isEntry"] = ""
-            insert_response["reason"] = gemini_result
-            insert_response["rule_entry_price"] = ""
-            insert_response["rule_stop_limit"] = ""
-            insert_response["rule_top_price"] = ""
-            insert_response["rule_period"] = ""
-    return insert_response
+
 
 if __name__ == "__main__":
     try:
@@ -105,53 +58,60 @@ if __name__ == "__main__":
         stock_codes = dao.fetch_company_code_list()
         # stock_codes = stock_codes[68:] # 0-68はすでに取得済み
         # stock_codes = stock_codes[216:] # 0-216はすでに取得済み
-        stock_codes = stock_codes[297:] # 0-292はすでに取得済み
-        stock_codes = stock_codes[400:] # 0-490はすでに取得済み
+        # stock_codes = stock_codes[297:]  # 0-292はすでに取得済み
+        stock_codes = stock_codes[297:]  # 0-490はすでに取得済み
+        # print("stock_codes:", stock_codes[0])
         # print(stock_codes)
         # stock_code = stock_codes[10]
+        dao.close()
+
         for stock_code in stock_codes:
+            # break
+            dao = StockDAO()
             # if stock_code == "27540":
             #     continue
             start_time = time.time()  # 処理開始時刻を記録
-            
+
             # if stock_code != "27530":
             #     continue
-            stock_price_api = StockPriceAPI(stock_code, os.environ.get("FETCH_DATA_RANGE"))
+            stock_price_api = StockPriceAPI(
+                stock_code, os.environ.get("FETCH_DATA_RANGE")
+            )
             price_data = stock_price_api.fetch_data_yfinance()
             if not price_data:
                 print(f"株価データの取得に失敗しました: {stock_code}")
                 continue
             indi_instance = IndicatorCalculator(price_data)
             indicator = indi_instance.get_indicators()
-            
+
             company_info = dao.fetch_company_info(stock_code)
-            industry_name = TableCategory.get_table_prefix(company_info[3])  # 企業名の取得
+            industry_name = TableCategory.get_table_prefix(
+                company_info[3]
+            )  # 企業名の取得
             dao.insert_indicator_data(indicator, stock_code, industry_name)
-            
+
             for price in price_data:
                 company_info = dao.fetch_company_info(stock_code)
                 result = dao.insert_stock_price_data(price, industry_name)
-                if not result:
+                if result == False:
                     print("result:", result)
                     break
-            
+
             # full_data = dao.get_stock_full_data_period(stock_code, industry_name)
             # handler = ApiHandler(full_data)
             # response = handler.call_gemini_api()
             # print("response:", response)
-            
+
             # insert_data = perse_response(full_data, response)
             # if insert_data == None:
             #     continue
             # print("insert_data:", insert_data)
             # dao.insert_api_response(insert_data)
-            
+
             end_time = time.time()  # 処理終了時刻を記録
             elapsed = end_time - start_time
             print(f"[ログ] 銘柄 {stock_code} の処理時間: {elapsed:.2f} 秒")
+            dao.close()
 
     except Exception as e:
         print(f"エラー発生: {e}")
-    finally:
-        dao.close()
-

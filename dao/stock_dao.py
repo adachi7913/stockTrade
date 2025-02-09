@@ -118,6 +118,7 @@ class StockDAO:
             return True
         except Exception as e:
             print(f"エラー発生: {e}")
+            self.conn.rollback()  # トランザクションをロールバックして状態をリセットする
 
     def insert_indicator_data(self, indicator_data, stock_code, industry_name):
         table_name = f"{industry_name}_indicator"
@@ -374,14 +375,16 @@ class StockDAO:
           - rule_stop_limit: SL価格 (例: "1330")
           - rule_top_price: 利確目標 (例: "1390-1395")
           - rule_period: 推奨保有期間 (例: "数日～1週間")
+          - riskReward: リスクリワード (例: "2.0" または "NG")
+          - score: スコア (例: 75)
         """
         query = """
         INSERT INTO api_response (
             date, code, close, isEntry, reason, 
-            rule_entry_price, rule_stop_limit, rule_top_price, rule_period
+            rule_entry_price, rule_stop_limit, rule_top_price, rule_period, risk_reward, score
         ) VALUES (
             %(date)s, %(code)s, %(close)s, %(isEntry)s, %(reason)s, 
-            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s
+            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(score)s
         )
         ON CONFLICT (code) DO UPDATE SET
             date = EXCLUDED.date,
@@ -391,7 +394,9 @@ class StockDAO:
             rule_entry_price = EXCLUDED.rule_entry_price,
             rule_stop_limit = EXCLUDED.rule_stop_limit,
             rule_top_price = EXCLUDED.rule_top_price,
-            rule_period = EXCLUDED.rule_period;
+            rule_period = EXCLUDED.rule_period,
+            risk_reward = EXCLUDED.risk_reward,
+            score = EXCLUDED.score;
         """
         
         try:

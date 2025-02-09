@@ -9,7 +9,7 @@ class ApiHandler:
         self.data = data
 
     def get_prompt(self):
-        # Convert Decimal values in self.data to float
+        # Decimal 型の値を float に変換するヘルパー関数
         def convert_decimals(obj):
             if isinstance(obj, dict):
                 return {k: convert_decimals(v) for k, v in obj.items()}
@@ -30,6 +30,8 @@ class ApiHandler:
     ・エントリー可否は、**可能/不可**のいずれかで回答してください。
     ・リスクリワードが2.0以上の場合のみエントリー可能とします。
     ・エントリーはロングのみとします
+    ・作成したトレードルールを自己採点し、**Scoreを0 ~ 100で算出**してください。
+    ・エントリー不可の場合、Scoreは0とします。
 
     今回は、DBから取得した最大過去５年間分の株価データと各インジケーター（以下がそのデータ構造）を提供します。
     各レコードは、次の構成になっています:
@@ -66,7 +68,7 @@ class ApiHandler:
     {json.dumps(data_converted, ensure_ascii=False)}
     出力形式は下記です。**JSONの形式を厳守**し、その他の内容は回答に含めないでください。:
     【出力形式】
-    {{isEntry:**"可能" / "不可"**, reason:**"理由"**, rule:{{entryPrice:**"Entry価格帯"**, sl:**"SL価格"**, tp:**"利確目標"**, period:**"推奨保有期間"**}}}}
+    {{isEntry:**"可能" / "不可"**, reason:**"理由"**, rule:{{entryPrice:**"Entry価格帯"** / "NG", sl:**"SL価格"** / "NG", tp:**"利確目標"** / "NG", period:**"推奨保有期間"** / "NG", riskReward:**"リスクリワード"** / "NG"}}, score:**"0 ~ 100"**}}
     """
         return prompt
 
