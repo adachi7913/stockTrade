@@ -3,7 +3,6 @@ import psycopg
 from dotenv import load_dotenv
 from datetime import date, timedelta
 import os
-import sys
 
 from lib.accsess_yFinance_for_stockPrice import StockPriceAPI
 from lib.indicator_calculator import IndicatorCalculator
@@ -377,14 +376,15 @@ class StockDAO:
           - rule_period: 推奨保有期間 (例: "数日～1週間")
           - riskReward: リスクリワード (例: "2.0" または "NG")
           - score: スコア (例: 75)
+          - no_entry_span: 再評価までの期間（日数、例: 7）
         """
         query = """
         INSERT INTO api_response (
             date, code, close, isEntry, reason, 
-            rule_entry_price, rule_stop_limit, rule_top_price, rule_period, risk_reward, score
+            rule_entry_price, rule_stop_limit, rule_top_price, rule_period, risk_reward, score, no_entry_span
         ) VALUES (
             %(date)s, %(code)s, %(close)s, %(isEntry)s, %(reason)s, 
-            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(score)s
+            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(score)s, %(no_entry_span)s
         )
         ON CONFLICT (code) DO UPDATE SET
             date = EXCLUDED.date,
@@ -396,7 +396,8 @@ class StockDAO:
             rule_top_price = EXCLUDED.rule_top_price,
             rule_period = EXCLUDED.rule_period,
             risk_reward = EXCLUDED.risk_reward,
-            score = EXCLUDED.score;
+            score = EXCLUDED.score,
+            no_entry_span = EXCLUDED.no_entry_span;
         """
         
         try:
@@ -422,6 +423,44 @@ class StockDAO:
         except Exception as e:
             print("api_responseテーブルからOKのレコード取得エラー:", e)
             return []
+        
+    def update_market_cap(self, code, market_cap):
+        from dotenv import load_dotenv
+        import psycopg
+        load_dotenv()
+        host = os.environ.get("DB_HOST")
+        database = os.environ.get("DB_NAME")
+        user = os.environ.get("DB_USER")
+        password = os.environ.get("DB_PASSWORD")
+
+        conn = psycopg.connect(host=host, dbname=database, user=user, password=password)
+        cur = conn.cursor()
+        # companies テーブルに market_cap カラムが存在するか確認
+        cur.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'companies' AND column_name = 'market_cap'
+        """)
+        if cur.fetchone() is None:
+            # カラムが存在しないので追加
+            cur.execute("ALTER TABLE companies ADD COLUMN market_cap NUMERIC;")
+            conn.commit()
+
+        # companies テーブル上のコードは5桁の英数字になっているため、4桁の場合は末尾に "0" を付加する
+        if len(code) == 4:
+            companies_code = code + "0"
+        else:
+            companies_code = code
+
+                # 銘柄コードをキーに、時価総額をインサート／更新する処理
+        cur.execute("""
+            INSERT INTO companies (code, market_cap) VALUES (%s, %s)
+            ON CONFLICT (code) DO UPDATE SET market_cap = EXCLUDED.market_cap
+        """, (companies_code, market_cap))
+        conn.commit()
+        cur.close()
+        conn.close()
+            # --- DB更新処理 ここまで ---
 
 
 if __name__ == 'main':

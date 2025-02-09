@@ -19,7 +19,8 @@ def parse_response(full_data, gemini_result):
         "rule_top_price": 利確目標 または "NG",
         "rule_period": 推奨保有期間 または "NG",
         "riskReward": リスクリワード（テキスト） または "NG",
-        "score": スコア（整数; 0 〜 100）
+        "score": スコア（整数; 0 〜 100）,
+        "no_entry_span": 再評価までの期間（数値）
       }
 
     ※ full_data が空の場合は処理をスキップして None を返します。
@@ -35,9 +36,9 @@ def parse_response(full_data, gemini_result):
     }
 
     # score を安全に整数変換するヘルパー
-    def safe_score(score_raw):
+    def safe_int(int_value):
         try:
-            return int(score_raw)
+            return int(int_value)
         except (ValueError, TypeError):
             return 0
 
@@ -52,7 +53,9 @@ def parse_response(full_data, gemini_result):
         insert_response["rule_period"] = rule.get("period", "")
         insert_response["riskReward"] = rule.get("riskReward", "")
         score_raw = gemini_result.get("score", "0")
-        insert_response["score"] = safe_score(score_raw)
+        insert_response["score"] = safe_int(score_raw)
+        no_entry_raw = gemini_result.get("no_entry_span", "0")
+        insert_response["no_entry_span"] = safe_int(no_entry_raw)
     elif isinstance(gemini_result, str):
         # 文字列の場合：先頭に「【出力形式】」があれば削除
         response_text = gemini_result.strip()
@@ -77,7 +80,9 @@ def parse_response(full_data, gemini_result):
             insert_response["rule_period"] = rule.get("period", "")
             insert_response["riskReward"] = rule.get("riskReward", "")
             score_raw = parsed.get("score", "0")
-            insert_response["score"] = safe_score(score_raw)
+            insert_response["score"] = safe_int(score_raw)
+            no_entry_raw = parsed.get("no_entry_span", "0")
+            insert_response["no_entry_span"] = safe_int(no_entry_raw)
         except Exception as e:
             print("APIレスポンスのパースに失敗しました:", e)
             # パースに失敗した場合は、そのまま生テキストをreasonとして格納する
@@ -89,4 +94,5 @@ def parse_response(full_data, gemini_result):
             insert_response["rule_period"] = ""
             insert_response["riskReward"] = ""
             insert_response["score"] = 0
+            insert_response["no_entry_span"] = 0
     return insert_response

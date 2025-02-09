@@ -1,7 +1,11 @@
 import os
+import sys
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
+
+from dao.stock_dao import StockDAO
+
 
 
 class StockPriceAPI:
@@ -31,6 +35,13 @@ class StockPriceAPI:
             today = datetime.now()
             yf_code = self.code + ".T"
             ticker = yf.Ticker(yf_code)
+
+            # --- DB更新用の処理（時価総額を companies テーブルに反映） ---
+            ticker_info = ticker.info
+            market_cap = ticker_info.get("marketCap")
+            if market_cap is not None:
+                stock_dao = StockDAO()
+                stock_dao.update_market_cap(self.code, market_cap)
 
             if self.expairy is not None:
                 # 指定された年数分のデータを取得
@@ -170,7 +181,6 @@ def _remove_trailing_zero(code):
 
 
 if __name__ == "__main__":
-    stock_code = "2753"
-    stock_price_api = StockPriceAPI(stock_code)
-    price_data = stock_price_api.fetch_data_yfinance()
-    print(price_data)
+    stock_dao = StockDAO()
+    stock_dao.update_market_cap("1301", 1000000000)
+    print("OK")
