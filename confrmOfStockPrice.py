@@ -1,6 +1,8 @@
 import json
+import os
 import re
 import sys
+import time
 from stock_dao import StockDAO
 from indicator_calculator import IndicatorCalculator
 from api_handler import ApiHandler
@@ -100,13 +102,15 @@ if __name__ == "__main__":
         stock_codes = dao.fetch_company_code_list()
         # stock_codes = stock_codes[68:] # 0-68はすでに取得済み
         # stock_codes = stock_codes[216:] # 0-216はすでに取得済み
-        stock_codes = stock_codes[370:] # 0-370はすでに取得済み
+        stock_codes = stock_codes[297:] # 0-292はすでに取得済み
         # print(stock_codes)
         # stock_code = stock_codes[10]
         for stock_code in stock_codes:
-            if stock_code != "27530":
-                continue
-            stock_price_api = StockPriceAPI(stock_code)
+            start_time = time.time()  # 処理開始時刻を記録
+            
+            # if stock_code != "27530":
+            #     continue
+            stock_price_api = StockPriceAPI(stock_code, os.environ.get("FETCH_DATA_RANGE"))
             price_data = stock_price_api.fetch_data_yfinance()
             if not price_data:
                 print(f"株価データの取得に失敗しました: {stock_code}")
@@ -115,22 +119,25 @@ if __name__ == "__main__":
             indicator = indi_instance.get_indicators()
             
             company_info = dao.fetch_company_info(stock_code)
-            industry_name = TableCategory.get_table_prefix(company_info[3]) # 企業名の取得
+            industry_name = TableCategory.get_table_prefix(company_info[3])  # 企業名の取得
             dao.insert_indicator_data(indicator, stock_code, industry_name)
+            
             for price in price_data:
                 company_info = dao.fetch_company_info(stock_code)
-                # print(company_info)
-                # print(f"industry_name: {industry_name}")
                 dao.insert_stock_price_data(price, industry_name)
-                # print(f"株価データを挿入しました: {price}")
+            
             full_data = dao.get_stock_full_data_period(stock_code, industry_name)
-            # print(f"full_data: {full_data}")
             handler = ApiHandler(full_data)
             response = handler.call_gemini_api()
-            print("response:",response)
+            print("response:", response)
+            
             insert_data = perse_response(full_data, response)
             print("insert_data:", insert_data)
             dao.insert_api_response(insert_data)
+            
+            end_time = time.time()  # 処理終了時刻を記録
+            elapsed = end_time - start_time
+            print(f"[ログ] 銘柄 {stock_code} の処理時間: {elapsed:.2f} 秒")
 
     except Exception as e:
         print(f"エラー発生: {e}")

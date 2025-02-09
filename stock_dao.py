@@ -1,8 +1,13 @@
+import time
 import psycopg
 from dotenv import load_dotenv
 from datetime import date, timedelta
 import os
 import sys
+
+from accsess_yFinance_for_stockPrice import StockPriceAPI
+from indicator_calculator import IndicatorCalculator
+from table_category import TableCategory
 
 
 class StockDAO:
@@ -59,7 +64,8 @@ class StockDAO:
             # companiesテーブルから全てのコードを取得
             select_query = """
             SELECT code FROM companies
-            WHERE market_name NOT IN ('その他');
+            WHERE market_name NOT IN ('その他')
+            ORDER BY code;
             """
             self.cur.execute(select_query)
             codes = self.cur.fetchall()
@@ -75,15 +81,25 @@ class StockDAO:
         try:
             """
             株価データの挿入または更新
-            stock_price_dataは以下のキーを含む辞書である必要があります:
-            - code: 株式コード
-            - date: 日付 (YYYY-MM-DD 形式またはDATE型にキャスト可能な文字列)
-            - open: 始値
-            - high: 高値
-            - low: 安値
-            - close: 終値
-            - volume: 出来高
+            stock_price_data は以下のキーを含む辞書である必要があります:
+              - code: 株式コード
+              - date: 日付 (YYYY-MM-DD 形式または DATE 型にキャスト可能な文字列)
+              - open: 始値
+              - high: 高値
+              - low: 安値
+              - close: 終値
+              - volume: 出来高
+              
+            ※numeric(10,2) のカラム設定のため、絶対値が 1e8 (100,000,000) 以上の場合は、
+               異常な値とみなしインサートをスキップします。
             """
+            # 異常値チェック: 株価（open, high, low, close）の各値が閾値以上なら挿入しない
+            threshold = 100_000_000  # 10^8
+            for key in ["open", "high", "low", "close"]:
+                if abs(stock_price_data.get(key, 0)) >= threshold:
+                    print(f"異常な株価データが検出されたため、インサートをスキップします: {stock_price_data}")
+                    return
+
             upsert_query = f"""
             INSERT INTO {table_name} (
                 code, date, open, high, low, close, volume
@@ -402,8 +418,47 @@ class StockDAO:
             return []
 
 
-if __name__ == "__main__":
-    dao = StockDAO()
-    company_info = dao.fetch_company_info("7203")
-    print("company_info:", company_info)
-    print("indutrty_name:", company_info[3])
+if __name__ == 'main':
+    """
+        過去データの取得とインジケーターの計算を行うメイン処理
+        取得するデータは全上場企業の株価データとインジケーターの計算結果
+        取得する年月は.envファイルのFETCH_DATA_RANGEで設定
+    """
+    try:
+        start_time = time.time()  # 処理開始時刻を記録
+        dao = StockDAO()
+        stock_codes = dao.fetch_company_code_list()
+        print("stock_codes:", stock_codes)
+        for stock_code in stock_codes:
+            start_time = time.time()  # 処理開始時刻を記録
+            
+            # if stock_code != "27530":
+            #     continue
+            stock_price_api = StockPriceAPI(stock_code)
+            price_data = stock_price_api.fetch_data_yfinance()
+            if not price_data:
+                print(f"株価データの取得に失敗しました: {stock_code}")
+                continue
+            indi_instance = IndicatorCalculator(price_data)
+            indicator = indi_instance.get_indicators()
+            
+            company_info = dao.fetch_company_info(stock_code)
+            industry_name = TableCategory.get_table_prefix(company_info[3])  # 企業名の取得
+            dao.insert_indicator_data(indicator, stock_code, industry_name)
+            
+            for price in price_data:
+                company_info = dao.fetch_company_info(stock_code)
+                dao.insert_stock_price_data(price, industry_name)
+            
+            full_data = dao.get_stock_full_data_period(stock_code, industry_name)
+
+            end_time = time.time()  # 処理終了時刻を記録
+            elapsed = end_time - start_time
+            print(f"[ログ] 銘柄 {stock_code} の処理時間: {elapsed:.2f} 秒")
+
+        elapsed = end_time - start_time
+        print(f"[ログ] 全体の処理時間: {elapsed:.2f} 秒")
+    except Exception as e:
+        print(f"エラー発生: {e}")
+    finally:
+        dao.close()
