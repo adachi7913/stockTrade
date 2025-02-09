@@ -9,13 +9,13 @@ if __name__ == "__main__":
     # from accsessEdinet import EdinetHandler  # edinet_handler.py から EdinetHandler をインポート
     # EdinetHandler.getEdinetData()
     import os
-    from accsess_yFinance_for_stockPrice import (
+    from lib.accsess_yFinance_for_stockPrice import (
         StockScraper,
     )  # data_scraper.py から StooqScraper をインポート
-    from indicator_calculator import (
+    from lib.indicator_calculator import (
         IndicatorCalculator,
     )  # indicator_calculator.py から IndicatorCalculator をインポート
-    from api_handler import ApiHandler  # api_handler.py から ApiHandler をインポート
+    from Gemini.api_handler import ApiHandler  # api_handler.py から ApiHandler をインポート
 
 # メイン処理: データ取得とAPI連携を実行します
 

@@ -1,4 +1,4 @@
-from stock_dao import StockDAO
+from dao.stock_dao import StockDAO
 
 
 class StockUtil:

@@ -1,6 +1,6 @@
 import requests
 
-from stock_dao import StockDAO
+from dao.stock_dao import StockDAO
 
 # Discord Webhook URL
 WEBHOOK_URL = "https://discord.com/api/webhooks/1337618282630484018/ftVzKF2Y7wwZ-w09VInBDVD5euszlvS7xLvxuuhKuvc03oW9dfQUI_GQs7HgNSNfOZ7u"

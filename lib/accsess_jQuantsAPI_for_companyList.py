@@ -2,7 +2,7 @@ import os
 import requests
 from dotenv import load_dotenv
 import json
-from stock_dao import create_companies_table, insert_company_data
+from dao.stock_dao import create_companies_table, insert_company_data
 import psycopg
 
 class JQuantsAPI:

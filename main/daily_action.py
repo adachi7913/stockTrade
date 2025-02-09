@@ -1,8 +1,8 @@
 import time
-from accsess_yFinance_for_stockPrice import fetch_batch_data_yfinance
-from indicator_calculator import IndicatorCalculator
-from stock_dao import StockDAO
-from table_category import TableCategory
+from lib.accsess_yFinance_for_stockPrice import fetch_batch_data_yfinance
+from lib.indicator_calculator import IndicatorCalculator
+from dao.stock_dao import StockDAO
+from lib.table_category import TableCategory
 
 
 if __name__ == "__main__":
@@ -10,7 +10,7 @@ if __name__ == "__main__":
         dao = StockDAO()
         stock_codes = dao.fetch_company_code_list()
         total_codes = len(stock_codes)
-        batch_size = 200
+        batch_size = 150
 
         print(f"[ログ] 総{total_codes}件の銘柄を、{batch_size}件ずつ処理します。")
         # 200件ずつ処理する
