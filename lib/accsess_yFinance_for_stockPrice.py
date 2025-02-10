@@ -4,7 +4,6 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 
-from dao.stock_dao import StockDAO
 
 
 
@@ -35,45 +34,37 @@ class StockPriceAPI:
             today = datetime.now()
             yf_code = self.code + ".T"
             ticker = yf.Ticker(yf_code)
-
-            # --- DB更新用の処理（時価総額を companies テーブルに反映） ---
+            # DB更新用の処理: 時価総額の取得と companies テーブルへの反映
             ticker_info = ticker.info
             market_cap = ticker_info.get("marketCap")
             if market_cap is not None:
+                from dao.stock_dao import StockDAO
                 stock_dao = StockDAO()
                 stock_dao.update_market_cap(self.code, market_cap)
-
+                stock_dao.close()
+            
             if self.expairy is not None:
-                # 指定された年数分のデータを取得
                 start_date = today - timedelta(days=int(self.expairy) * 365)
                 df = ticker.history(start=start_date, end=today)
             else:
-                # expairy が指定されていない場合は、最新の取引日の全レコードを取得した後、
-                # 最新の1件のみを抽出する
                 df = ticker.history(period="1d")
                 if not df.empty:
-                    df = df.iloc[[-1]]  # 最新の1件に絞る
-
+                    df = df.iloc[[-1]]
             df.fillna(0, inplace=True)
             if df.empty:
-                raise ValueError(
-                    f"No data retrieved for code {yf_code} from yfinance API."
-                )
+                raise ValueError(f"No data retrieved for code {yf_code} from yfinance API.")
 
             data = []
-            # DataFrame から必要なデータを抽出してリストに格納
             for index, row in df.iterrows():
-                data.append(
-                    {
-                        "code": self.code,
-                        "date": index.strftime("%Y%m%d"),
-                        "open": float(row["Open"]),
-                        "high": float(row["High"]),
-                        "low": float(row["Low"]),
-                        "close": float(row["Close"]),
-                        "volume": int(row["Volume"]),
-                    }
-                )
+                data.append({
+                    "code": self.code,
+                    "date": index.strftime("%Y%m%d"),
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                    "volume": int(row["Volume"]),
+                })
             return data
         except Exception as e:
             print(f"Error fetching data for {self.code} from yfinance API: {e}")
@@ -179,8 +170,8 @@ def _remove_trailing_zero(code):
     # 株式コードの末尾のゼロが存在する場合に削除します
     return code[:-1] if code.endswith("0") else code
 
-
-if __name__ == "__main__":
-    stock_dao = StockDAO()
-    stock_dao.update_market_cap("1301", 1000000000)
-    print("OK")
+# TODO: 時価総額追加
+# if __name__ == "__main__":
+    # stock_dao = StockDAO()
+    # stock_dao.update_market_cap("1301", 1000000000)
+    # print("OK")

@@ -74,6 +74,16 @@ class ApiHandler:
     """
         return prompt
 
+    def _extract_json(self, content):
+        """
+        Gemini API のレスポンス中、マークダウンの ```json ... ``` 形式で囲まれている場合、
+        その中身のみを抽出するヘルパー関数
+        """
+        match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
+        if match:
+            return match.group(1)
+        return content
+
     def call_gemini_api(self):
         # Gemini APIを呼び出して予測結果を取得します
         print("call_gemini_api() started")
@@ -112,19 +122,11 @@ class ApiHandler:
                 print("候補トークン(candidatesTokenCount):", usage.get("candidatesTokenCount", "不明"))
                 print("合計トークン(totalTokenCount):", usage.get("totalTokenCount", "不明"))
                 content = json_response['candidates'][0]['content']['parts'][0]['text']
-                # マークダウン記法の ```json ... ``` を削除する
-                if isinstance(content, dict):
-                    content = json.dumps(content, ensure_ascii=False)
-                match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
-                if match:
-                    json_text = match.group(1)
-                else:
-                    json_text = content
-                    
+                json_text = self._extract_json(content)
                 return json_text
             except Exception as e:
                 print("JSON parse error:", e)
-                return {"error": "JSON parse error", "raw": json_response['candidates'][0]['content']}
+                return {"error": "JSON parse error", "raw": json_response.get('candidates', [{}])[0].get('content')}
             # else:
             #     return {"error": "No prediction found or invalid API response"}
         except requests.RequestException as e:

@@ -3,7 +3,7 @@ import requests
 from dao.stock_dao import StockDAO
 from util.date_util import get_current_datetime
 
-# Discord Webhook URL
+# Discord Webhook URLs
 ERROR_URL = "https://discord.com/api/webhooks/1338074017449381918/KjUzGGg7-NF1YtxCuW_kw8uBK50OkOVHP-BMhiVFi-n3JhaBZJnhepn_7Ec0wQcSjomm"
 WEBHOOK_URL = "https://discord.com/api/webhooks/1337618282630484018/ftVzKF2Y7wwZ-w09VInBDVD5euszlvS7xLvxuuhKuvc03oW9dfQUI_GQs7HgNSNfOZ7u"
 
@@ -24,6 +24,7 @@ def send_to_discord(url, message):
         print(f"Discordへの送信に失敗しました: {e}")
     else:
         print("Discordにメッセージを送信しました。")
+
 def create_send_message(response):
     """
     送信するメッセージを生成する関数
@@ -39,8 +40,8 @@ def create_send_message(response):
     [自己採点スコア]：{7}
     [保有期間]：{6}
     [エントリー可能理由]：{7}
-        """.format(response[0], response[1], response[2], response[3],
-                response[4], response[5], response[6], response[7])
+    """.format(response[0], response[1], response[2], response[3],
+               response[4], response[5], response[6], response[7])
     return comment
 
 def create_error_message(message):
@@ -50,15 +51,9 @@ def create_error_message(message):
     comment = """
     [エラー発生日]：{0}
     [エラー内容]：{1}
-        """.format(get_current_datetime(), message)
+    """.format(get_current_datetime(), message)
     send_to_discord(ERROR_URL, comment)
 
 if __name__ == "__main__":
-    # テスト用のサンプルメッセージを送信
-    response_list = StockDAO().fetch_ok_api_response()
-    for response in response_list:
-        try:
-            send_to_discord(response)
-        except Exception as e:
-            print(f"Discordへの送信に失敗しました: {e}")
-            continue
+    # テスト用サンプル（必要に応じて）
+    send_to_discord(WEBHOOK_URL, "テストメッセージ")

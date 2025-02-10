@@ -425,85 +425,25 @@ class StockDAO:
             return []
         
     def update_market_cap(self, code, market_cap):
-        from dotenv import load_dotenv
-        import psycopg
-        load_dotenv()
-        host = os.environ.get("DB_HOST")
-        database = os.environ.get("DB_NAME")
-        user = os.environ.get("DB_USER")
-        password = os.environ.get("DB_PASSWORD")
+        try:
+            # market_capカラムが存在するか確認。存在しなければ追加する
+            self.cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'companies' AND column_name = 'market_cap'
+            """)
+            if self.cur.fetchone() is None:
+                self.cur.execute("ALTER TABLE companies ADD COLUMN market_cap NUMERIC;")
+                self.conn.commit()
 
-        conn = psycopg.connect(host=host, dbname=database, user=user, password=password)
-        cur = conn.cursor()
-        # companies テーブルに market_cap カラムが存在するか確認
-        cur.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'companies' AND column_name = 'market_cap'
-        """)
-        if cur.fetchone() is None:
-            # カラムが存在しないので追加
-            cur.execute("ALTER TABLE companies ADD COLUMN market_cap NUMERIC;")
-            conn.commit()
+            # 4桁の場合は末尾に "0" を追加
+            companies_code = code + "0" if len(code) == 4 else code
 
-        # companies テーブル上のコードは5桁の英数字になっているため、4桁の場合は末尾に "0" を付加する
-        if len(code) == 4:
-            companies_code = code + "0"
-        else:
-            companies_code = code
-
-                # 銘柄コードをキーに、時価総額をインサート／更新する処理
-        cur.execute("""
-            INSERT INTO companies (code, market_cap) VALUES (%s, %s)
-            ON CONFLICT (code) DO UPDATE SET market_cap = EXCLUDED.market_cap
-        """, (companies_code, market_cap))
-        conn.commit()
-        cur.close()
-        conn.close()
-            # --- DB更新処理 ここまで ---
-
-
-if __name__ == 'main':
-    """
-        過去データの取得とインジケーターの計算を行うメイン処理
-        取得するデータは全上場企業の株価データとインジケーターの計算結果
-        取得する年月は.envファイルのFETCH_DATA_RANGEで設定
-    """
-    try:
-        start_time = time.time()  # 処理開始時刻を記録
-        dao = StockDAO()
-        stock_codes = dao.fetch_company_code_list()
-        print("stock_codes:", stock_codes)
-        for stock_code in stock_codes:
-            start_time = time.time()  # 処理開始時刻を記録
-            
-            # if stock_code != "27530":
-            #     continue
-            stock_price_api = StockPriceAPI(stock_code)
-            price_data = stock_price_api.fetch_data_yfinance()
-            if not price_data:
-                print(f"株価データの取得に失敗しました: {stock_code}")
-                continue
-            indi_instance = IndicatorCalculator(price_data)
-            indicator = indi_instance.get_indicators()
-            
-            company_info = dao.fetch_company_info(stock_code)
-            industry_name = TableCategory.get_table_prefix(company_info[3])  # 企業名の取得
-            dao.insert_indicator_data(indicator, stock_code, industry_name)
-            
-            for price in price_data:
-                company_info = dao.fetch_company_info(stock_code)
-                dao.insert_stock_price_data(price, industry_name)
-            
-            full_data = dao.get_stock_full_data_period(stock_code, industry_name)
-
-            end_time = time.time()  # 処理終了時刻を記録
-            elapsed = end_time - start_time
-            print(f"[ログ] 銘柄 {stock_code} の処理時間: {elapsed:.2f} 秒")
-
-        elapsed = end_time - start_time
-        print(f"[ログ] 全体の処理時間: {elapsed:.2f} 秒")
-    except Exception as e:
-        print(f"エラー発生: {e}")
-    finally:
-        dao.close()
+            # 既存のレコードがある場合は、時価総額だけを更新する
+            self.cur.execute(
+                "UPDATE companies SET market_cap = %s WHERE code = %s",
+                (market_cap, companies_code)
+            )
+            self.conn.commit()
+        except Exception as e:
+            print(f"市場CAP更新エラー: {e}")
