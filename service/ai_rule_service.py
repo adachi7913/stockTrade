@@ -39,10 +39,10 @@ def run_ai_rule_generation(start_code=None):
                 # 最新レコードから終値を取得
                 latest_record = full_data[-1]
                 close_price = float(latest_record.get("close", 0))
-                # フィルターはyfinanceのティッカー記法（例:"7203.T"）を想定するため補正
-                ticker_symbol = stock_code if stock_code.endswith(".T") else stock_code + ".T"
+                # DAOから時価総額を取得
+                market_cap = dao.fetch_market_cap(stock_code)
                 from lib.stock_filter import filter_stock
-                if not filter_stock(ticker_symbol, close_price):
+                if not filter_stock(stock_code, close_price, market_cap):
                     print(f"{stock_code}: フィルターによりGemini APIリクエスト対象外")
                     return
 

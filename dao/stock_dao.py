@@ -447,3 +447,17 @@ class StockDAO:
             self.conn.commit()
         except Exception as e:
             print(f"市場CAP更新エラー: {e}")
+
+    def fetch_market_cap(self, code):
+        try:
+            # 4桁の場合は末尾に "0" を追加
+            companies_code = code + "0" if len(code) == 4 else code
+            query = "SELECT market_cap FROM companies WHERE code = %s"
+            self.cur.execute(query, (companies_code,))
+            result = self.cur.fetchone()
+            if result:
+                return result[0]
+            return None
+        except Exception as e:
+            print(f"market_cap取得エラー({code}): {e}")
+            return None
