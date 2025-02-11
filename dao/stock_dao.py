@@ -148,15 +148,20 @@ class StockDAO:
             :param stock_code: 対象の銘柄コード
             :param table_name: 挿入先のインジケーター・テーブル名（例: "retail_indicator"）
             """
+            # カラムが存在しなければ、rsi と macd カラムを追加する
+            self.cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS rsi NUMERIC;")
+            self.cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS macd NUMERIC;")
+            self.conn.commit()
+
             query = f"""
             INSERT INTO {table_name} (
                 code, date,
                 ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a, ichimoku_senkou_b,
-                adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr
+                adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr, rsi, macd
             ) VALUES (
                 %(code)s, %(date)s,
                 %(tenkan)s, %(kijun)s, %(senkou_a)s, %(senkou_b)s,
-                %(adx)s, %(bb_lower)s, %(bb_middle)s, %(bb_upper)s, %(stoch_k)s, %(stoch_d)s, %(atr)s
+                %(adx)s, %(bb_lower)s, %(bb_middle)s, %(bb_upper)s, %(stoch_k)s, %(stoch_d)s, %(atr)s, %(rsi)s, %(macd)s
             )
             ON CONFLICT (code, date) DO UPDATE SET
                 ichimoku_tenkan = EXCLUDED.ichimoku_tenkan,
@@ -169,7 +174,9 @@ class StockDAO:
                 bb_upper = EXCLUDED.bb_upper,
                 stoch_k = EXCLUDED.stoch_k,
                 stoch_d = EXCLUDED.stoch_d,
-                atr = EXCLUDED.atr;
+                atr = EXCLUDED.atr,
+                rsi = EXCLUDED.rsi,
+                macd = EXCLUDED.macd;
             """
             
             for date_str, data in indicator_data.items():
@@ -197,6 +204,8 @@ class StockDAO:
                 stoch_k   = round(data['stoch']['stoch_k'], 2)
                 stoch_d   = round(data['stoch']['stoch_d'], 2)
                 atr       = round(data['atr'], 2)
+                rsi       = round(data['rsi'], 2)
+                macd      = round(data['macd'], 2)
 
                 params = {
                     "code": stock_code,
@@ -211,7 +220,9 @@ class StockDAO:
                     "bb_upper": bb_upper,
                     "stoch_k": stoch_k,
                     "stoch_d": stoch_d,
-                    "atr": atr
+                    "atr": atr,
+                    "rsi": rsi,
+                    "macd": macd
                 }
 
                 self.cur.execute(query, params)
@@ -460,4 +471,25 @@ class StockDAO:
             return None
         except Exception as e:
             print(f"market_cap取得エラー({code}): {e}")
+            return None
+
+    def fetch_no_entry_info(self, stock_code):
+        """
+        api_response テーブルから最新のエントリー不可情報（date, no_entry_span）を取得します。
+        返り値は (date, no_entry_span) のタプルまたは None です。
+        ※ date は文字列 "YYYY-MM-DD" として保存されている前提です。
+        """
+        try:
+            query = """
+                SELECT date, no_entry_span
+                FROM api_response
+                WHERE code = %s
+                ORDER BY date DESC
+                LIMIT 1;
+            """
+            self.cur.execute(query, (stock_code,))
+            result = self.cur.fetchone()
+            return result  # (date, no_entry_span) または None
+        except Exception as e:
+            print(f"no_entry情報取得エラー({stock_code}): {e}")
             return None

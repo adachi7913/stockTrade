@@ -39,10 +39,17 @@ def run_ai_rule_generation(start_code=None):
                 # 最新レコードから終値を取得
                 latest_record = full_data[-1]
                 close_price = float(latest_record.get("close", 0))
-                # DAOから時価総額を取得
+
+                # DAOから時価総額および最新のエントリー不可情報を取得
                 market_cap = dao.fetch_market_cap(stock_code)
+                no_entry_info = dao.fetch_no_entry_info(stock_code)
+                if no_entry_info is not None:
+                    last_entry_date, no_entry_span = no_entry_info
+                else:
+                    last_entry_date, no_entry_span = None, None
+
                 from lib.stock_filter import filter_stock
-                if not filter_stock(stock_code, close_price, market_cap):
+                if not filter_stock(stock_code, close_price, market_cap, last_entry_date, no_entry_span):
                     print(f"{stock_code}: フィルターによりGemini APIリクエスト対象外")
                     return
 
@@ -72,7 +79,7 @@ def run_ai_rule_generation(start_code=None):
                 except Exception:
                     pass
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             executor.map(process_stock, stock_codes)
     except Exception as e:
         error_msg = traceback.format_exc()

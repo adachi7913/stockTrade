@@ -22,6 +22,8 @@ class IndicatorCalculator:
                 "bb": self.calculate_bollinger_bands(closes),
                 "stoch": self.calculate_stochastic(ohlc_data, high, low, closes),
                 "atr": self.calculate_atr(ohlc_data, high, low, closes),
+                "rsi": self.calculate_rsi(closes),
+                "macd": self.calculate_macd(closes)
             }
     
             indicators_by_date[self.data[i]["date"]] = indicators
@@ -87,6 +89,29 @@ class IndicatorCalculator:
             atr_series = ta.atr(high=high, low=low, close=closes, length=14)
             return float(atr_series.iloc[-1])
         else:
+            return 0
+
+    def calculate_rsi(self, closes, length=14):
+        if len(closes) < length:
+            return 0
+        try:
+            rsi_series = ta.rsi(closes, length=length)
+            return float(rsi_series.iloc[-1]) if not pd.isna(rsi_series.iloc[-1]) else 0
+        except Exception:
+            return 0
+
+    def calculate_macd(self, closes, fast=12, slow=26, signal=9):
+        if len(closes) < slow:
+            return 0
+        try:
+            macd_df = ta.macd(closes, fast=fast, slow=slow, signal=signal)
+            # MACDラインのみを使う（MACD_12_26_9）
+            if "MACD_12_26_9" in macd_df.columns:
+                macd_value = float(macd_df["MACD_12_26_9"].iloc[-1])
+                return macd_value
+            else:
+                return 0
+        except Exception:
             return 0
 
 
