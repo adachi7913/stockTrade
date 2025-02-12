@@ -1,7 +1,7 @@
 import time
 import psycopg
 from dotenv import load_dotenv
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import os
 
 from lib.accsess_yFinance_for_stockPrice import StockPriceAPI
@@ -275,7 +275,7 @@ class StockDAO:
                 
             # 期間設定：本日から1年前まで
             today = date.today()
-            one_year_ago = today - timedelta(days=365)
+            one_year_ago = today - timedelta(days=int(os.environ.get("FETCH_DATA_RANGE"))*365)
                 
             # SQL：価格テーブルと指標テーブルをcode, dateで結合
             query = f"""
@@ -392,10 +392,10 @@ class StockDAO:
         query = """
         INSERT INTO api_response (
             date, code, close, isEntry, reason, 
-            rule_entry_price, rule_stop_limit, rule_top_price, rule_period, risk_reward, score, no_entry_span
+            rule_entry_price, rule_stop_limit, rule_top_price, rule_period, risk_reward, score, no_entry_span, update_when
         ) VALUES (
             %(date)s, %(code)s, %(close)s, %(isEntry)s, %(reason)s, 
-            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(score)s, %(no_entry_span)s
+            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(score)s, %(no_entry_span)s, %(update_when)s
         )
         ON CONFLICT (code) DO UPDATE SET
             date = EXCLUDED.date,
@@ -408,9 +408,12 @@ class StockDAO:
             rule_period = EXCLUDED.rule_period,
             risk_reward = EXCLUDED.risk_reward,
             score = EXCLUDED.score,
-            no_entry_span = EXCLUDED.no_entry_span;
+            no_entry_span = EXCLUDED.no_entry_span,
+            update_when = EXCLUDED.update_when;
         """
         
+        from datetime import datetime
+        response_data["update_when"] = datetime.now()
         try:
             self.cur.execute(query, response_data)
             self.conn.commit()

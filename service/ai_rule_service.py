@@ -1,6 +1,8 @@
 import time
 import traceback
 import concurrent.futures
+from dotenv import load_dotenv  # .env再読み込み用
+import os
 
 from dao.stock_dao import StockDAO
 from Gemini.api_handler import ApiHandler
@@ -20,8 +22,14 @@ def run_ai_rule_generation(start_code=None):
             stock_codes = stock_codes[start_index:]
         print("対象銘柄コード:", stock_codes)
 
-        # 各銘柄の処理を4スレッドで並列実行
+        # 各銘柄の処理を複数スレッドで並列実行
         def process_stock(stock_code):
+            # .envファイルを再読み込みし、動的な値の更新を反映
+            load_dotenv(override=True)
+            if os.getenv("STOP_GEMINI_FLAG", "false").lower() == "y":
+                # print(f"STOP_GEMINI_FLAGが設定されているため、{stock_code} の処理をスキップします。")
+                return
+
             dao = StockDAO()
             try:
                 company_info = dao.fetch_company_info(stock_code)
@@ -79,7 +87,7 @@ def run_ai_rule_generation(start_code=None):
                 except Exception:
                     pass
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             executor.map(process_stock, stock_codes)
     except Exception as e:
         error_msg = traceback.format_exc()

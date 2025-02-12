@@ -4,7 +4,9 @@ from lib.indicator_calculator import IndicatorCalculator
 from dao.stock_dao import StockDAO
 from lib.table_category import TableCategory
 
-
+# TODO: 最新日付のみのデータを取得するバッチ処理を実装する
+# TODO:WebUIでSBI証券の取引を行う
+# TODO:価格・インジ・情報で３分割し、.envでそれぞれ制御する
 if __name__ == "__main__":
     try:
         dao = StockDAO()
