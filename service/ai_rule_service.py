@@ -57,7 +57,13 @@ def run_ai_rule_generation(start_code=None):
                     last_entry_date, no_entry_span = None, None
 
                 from lib.stock_filter import filter_stock
-                if not filter_stock(stock_code, close_price, market_cap, last_entry_date, no_entry_span):
+                # full_data内の各日付の出来高を抽出（float型に変換）
+                volume_data = [float(record.get("volume", 0)) for record in full_data]
+                # 最新の指標データを最新レコードから取得
+                atr = float(latest_record.get("atr", 0))
+                rsi_val = float(latest_record.get("rsi", 0))
+                stoch_k = float(latest_record.get("stoch", {}).get("stoch_k", 0))
+                if not filter_stock(stock_code, close_price, market_cap, last_entry_date, no_entry_span, volume_data, atr, rsi_val, stoch_k):
                     print(f"{stock_code}: フィルターによりGemini APIリクエスト対象外")
                     return
 
