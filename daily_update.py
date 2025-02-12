@@ -49,5 +49,6 @@ if __name__ == "__main__":
     stock_codes = dao.fetch_company_code_list()
     dao.close()
     print(f"[ログ] 総{len(stock_codes)}件の銘柄を処理します。")
-    for stock_code in stock_codes:
-        process_stock(stock_code)
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+         executor.map(process_stock, stock_codes)

@@ -3,6 +3,7 @@ import os
 import json  # json モジュールをインポート
 import re
 from decimal import Decimal
+import time  # リトライ用に追加
 
 class ApiHandler:
     def __init__(self, data):
@@ -93,7 +94,6 @@ class ApiHandler:
         return content
 
     def call_gemini_api(self):
-        # Gemini APIを呼び出して予測結果を取得します
         print("call_gemini_api() started")
         print("Calling Gemini API")
         api_key = os.environ.get("GEMINI_API_KEY")  # 環境変数からAPIキーを取得
@@ -114,31 +114,47 @@ class ApiHandler:
         }
         headers = {'Content-Type': 'application/json'}
 
-        try:
-            response = requests.post(api_url, json=payload, headers=headers)
-            response.raise_for_status()
-            json_response = response.json()
-            # print("API response:", json_response)
-            
-            # Gemini APIからのレスポンスを処理します
-            # if json_response and 'candidates' in json_response and json_response['candidates']:
-            #     content = json_response['candidates'][0]['content']['parts']['text']
+        max_retries = 3  # 最大リトライ回数
+        attempt = 0
+        while attempt < max_retries:
             try:
-                # usageMetadataからトークン情報をログ出力する
-                usage = json_response.get("usageMetadata", {})
-                print("入力トークン(promptTokenCount):", usage.get("promptTokenCount", "不明"))
-                print("候補トークン(candidatesTokenCount):", usage.get("candidatesTokenCount", "不明"))
-                print("合計トークン(totalTokenCount):", usage.get("totalTokenCount", "不明"))
-                content = json_response['candidates'][0]['content']['parts'][0]['text']
-                json_text = self._extract_json(content)
-                return json_text
-            except Exception as e:
-                print("JSON parse error:", e)
-                return {"error": "JSON parse error", "raw": json_response.get('candidates', [{}])[0].get('content')}
-            # else:
-            #     return {"error": "No prediction found or invalid API response"}
-        except requests.RequestException as e:
-            print(f"Gemini API call failed: {e}, request: {e.request}, response: {e.response}")
-            return f"Gemini API call failed: {e}"
+                response = requests.post(api_url, json=payload, headers=headers)
+                # 503の場合はリトライ
+                if response.status_code == 503:
+                    attempt += 1
+                    print(f"Gemini API returned 503. Retrying {attempt}/{max_retries} after 5 seconds...")
+                    time.sleep(5)
+                    continue
+                response.raise_for_status()
+                json_response = response.json()
+                # print("API response:", json_response)
+                
+                # Gemini APIからのレスポンスを処理します
+                # if json_response and 'candidates' in json_response and json_response['candidates']:
+                #     content = json_response['candidates'][0]['content']['parts']['text']
+                try:
+                    # usageMetadataからトークン情報をログ出力する
+                    usage = json_response.get("usageMetadata", {})
+                    print("入力トークン(promptTokenCount):", usage.get("promptTokenCount", "不明"))
+                    print("候補トークン(candidatesTokenCount):", usage.get("candidatesTokenCount", "不明"))
+                    print("合計トークン(totalTokenCount):", usage.get("totalTokenCount", "不明"))
+                    content = json_response['candidates'][0]['content']['parts'][0]['text']
+                    json_text = self._extract_json(content)
+                    return json_text
+                except Exception as e:
+                    print("JSON parse error:", e)
+                    return {"error": "JSON parse error", "raw": json_response.get('candidates', [{}])[0].get('content')}
+                # else:
+                #     return {"error": "No prediction found or invalid API response"}
+            except requests.RequestException as e:
+                if e.response is not None and e.response.status_code == 503:
+                    attempt += 1
+                    print(f"RequestException with 503 received. Retrying {attempt}/{max_retries} after 5 seconds...")
+                    time.sleep(5)
+                    continue
+                else:
+                    print(f"Gemini API call failed: {e}, request: {e.request}, response: {e.response}")
+                    return f"Gemini API call failed: {e}"
+        return {"error": "Failed after multiple retries due to 503 response."}
     
     

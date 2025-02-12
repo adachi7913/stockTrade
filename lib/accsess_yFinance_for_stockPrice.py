@@ -5,8 +5,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 
-
-
 class StockPriceAPI:
     def __init__(self, code, expairy=None):
         """
@@ -14,11 +12,13 @@ class StockPriceAPI:
 
         Parameters:
             code (str): 株式コード。末尾のゼロは自動的に削除します。
-            expairy (int, optional): 取得期間としての年数。指定された場合は、今日から expairy 年前までのデータを取得します。
-                                      指定しない場合は、最新の1件のみのデータを取得します。
+            expairy (int or str, optional): 取得期間としての年数。指定された場合は、今日から expairy 年前までのデータを取得します。
+                指定しない場合は、最新の1件のみのデータを取得します。
+                .envから取得した場合、空文字の場合は None として扱います。
         """
         self.code = _remove_trailing_zero(code)
-        self.expairy = expairy
+        # .env で空文字の場合は None として扱う
+        self.expairy = expairy if expairy not in (None, "") else None
 
     def fetch_data_yfinance(self):
         """
@@ -39,32 +39,49 @@ class StockPriceAPI:
             market_cap = ticker_info.get("marketCap")
             if market_cap is not None:
                 from dao.stock_dao import StockDAO
+
                 stock_dao = StockDAO()
                 stock_dao.update_market_cap(self.code, market_cap)
                 stock_dao.close()
-            
+
             if self.expairy is not None:
                 start_date = today - timedelta(days=int(self.expairy) * 365)
                 df = ticker.history(start=start_date, end=today)
             else:
-                df = ticker.history(period="1d")
+                # 期間を5日分取得し、最新のレコードのみを使用する
+                df = ticker.history(period="5d")
                 if not df.empty:
                     df = df.iloc[[-1]]
             df.fillna(0, inplace=True)
             if df.empty:
-                raise ValueError(f"No data retrieved for code {yf_code} from yfinance API.")
+                raise ValueError(
+                    f"No data retrieved for code {yf_code} from yfinance API."
+                )
 
             data = []
             for index, row in df.iterrows():
-                data.append({
-                    "code": self.code,
-                    "date": index.strftime("%Y%m%d"),
-                    "open": float(row["Open"]),
-                    "high": float(row["High"]),
-                    "low": float(row["Low"]),
-                    "close": float(row["Close"]),
-                    "volume": int(row["Volume"]),
-                })
+                # 出来高の値が空文字の場合は 0 として扱う
+                vol = row["Volume"]
+                if isinstance(vol, str):
+                    vol = vol.strip()
+                    if vol == "":
+                        vol_value = 0
+                    else:
+                        vol_value = int(vol)
+                else:
+                    vol_value = int(vol)
+
+                data.append(
+                    {
+                        "code": self.code,
+                        "date": index.strftime("%Y%m%d"),
+                        "open": float(row["Open"]),
+                        "high": float(row["High"]),
+                        "low": float(row["Low"]),
+                        "close": float(row["Close"]),
+                        "volume": vol_value,
+                    }
+                )
             return data
         except Exception as e:
             print(f"Error fetching data for {self.code} from yfinance API: {e}")
@@ -76,7 +93,6 @@ class StockPriceAPI:
             if expairy is not None:
                 start_date = today - timedelta(days=int(expairy) * 365)
             ticker_symbols = [code + ".T" for code in stock_codes]
-            tickers_str = " ".join(ticker_symbols)
             tickers = yf.Tickers(ticker_symbols)
 
             if expairy is not None:
@@ -88,10 +104,43 @@ class StockPriceAPI:
                 print("一部もしくは全ティッカーでデータが取得できませんでした。")
                 return {}
 
-            # 以下、各ティッカーごとにレコードを抽出する処理
-            # ※個別にエラーになったティッカーは結果に含めないようにする
             results = {}
-            if isinstance(df.columns, pd.MultiIndex):
+            # 単一ティッカーの場合、またはMultiIndexでない場合は別処理
+            if len(ticker_symbols) == 1 or not isinstance(df.columns, pd.MultiIndex):
+                ticker = ticker_symbols[0]
+                records = []
+                if expairy is None:
+                    try:
+                        record = df.iloc[-1]
+                        date_str = record.name.strftime("%Y%m%d")
+                        record_dict = {
+                            "code": ticker.replace(".T", ""),
+                            "date": date_str,
+                            "open": float(record["Open"]),
+                            "high": float(record["High"]),
+                            "low": float(record["Low"]),
+                            "close": float(record["Close"]),
+                            "volume": int(record["Volume"]),
+                        }
+                        records.append(record_dict)
+                    except Exception as e:
+                        print(f"{ticker} の最新データ抽出でエラー: {e}")
+                else:
+                    for index, row in df.iterrows():
+                        date_str = index.strftime("%Y%m%d")
+                        record_dict = {
+                            "code": ticker.replace(".T", ""),
+                            "date": date_str,
+                            "open": float(row["Open"]),
+                            "high": float(row["High"]),
+                            "low": float(row["Low"]),
+                            "close": float(row["Close"]),
+                            "volume": int(row["Volume"]),
+                        }
+                        records.append(record_dict)
+                results[ticker.replace(".T", "")] = records
+            else:
+                # 複数ティッカーの場合の処理
                 for ticker in ticker_symbols:
                     if ticker not in df.columns.get_level_values(0):
                         print(f"{ticker} のデータは取得できませんでした。")
@@ -129,25 +178,64 @@ class StockPriceAPI:
                             }
                             records.append(record_dict)
                     results[ticker.replace(".T", "")] = records
-            else:
-                # 単一ティッカーの場合の処理
-                ticker = ticker_symbols[0]
+            return results
+        except Exception as e:
+            print("Error fetching batch data for tickers:", e)
+            return {}
+
+
+def _remove_trailing_zero(code):
+    # 株式コードの末尾のゼロが存在する場合に削除します
+    return code[:-1] if code.endswith("0") else code
+
+
+def fetch_batch_data_yfinance(stock_codes, expairy=None):
+    try:
+        today = datetime.now()
+        if expairy is not None:
+            start_date = today - timedelta(days=int(expairy) * 365)
+        ticker_symbols = [code + ".T" for code in stock_codes]
+        tickers_str = " ".join(ticker_symbols)
+        tickers = yf.Tickers(ticker_symbols)
+
+        if expairy is not None:
+            df = tickers.history(start=start_date, end=today)
+        else:
+            df = tickers.history(period="1d")
+        df.fillna(0, inplace=True)
+        if df.empty:
+            print("一部もしくは全ティッカーでデータが取得できませんでした。")
+            return {}
+
+        # 以下、各ティッカーごとにレコードを抽出する処理
+        # ※個別にエラーになったティッカーは結果に含めないようにする
+        results = {}
+        if isinstance(df.columns, pd.MultiIndex):
+            for ticker in ticker_symbols:
+                if ticker not in df.columns.get_level_values(0):
+                    print(f"{ticker} のデータは取得できませんでした。")
+                    continue
+                ticker_df = df[ticker]
                 records = []
                 if expairy is None:
-                    record = df.iloc[-1]
-                    date_str = record.name.strftime("%Y%m%d")
-                    record_dict = {
-                        "code": ticker.replace(".T", ""),
-                        "date": date_str,
-                        "open": float(record["Open"]),
-                        "high": float(record["High"]),
-                        "low": float(record["Low"]),
-                        "close": float(record["Close"]),
-                        "volume": int(record["Volume"]),
-                    }
-                    records.append(record_dict)
+                    try:
+                        record = ticker_df.iloc[-1]
+                        date_str = record.name.strftime("%Y%m%d")
+                        record_dict = {
+                            "code": ticker.replace(".T", ""),
+                            "date": date_str,
+                            "open": float(record["Open"]),
+                            "high": float(record["High"]),
+                            "low": float(record["Low"]),
+                            "close": float(record["Close"]),
+                            "volume": int(record["Volume"]),
+                        }
+                        records.append(record_dict)
+                    except Exception as e:
+                        print(f"{ticker} の最新データ抽出でエラー: {e}")
+                        continue
                 else:
-                    for index, row in df.iterrows():
+                    for index, row in ticker_df.iterrows():
                         date_str = index.strftime("%Y%m%d")
                         record_dict = {
                             "code": ticker.replace(".T", ""),
@@ -160,18 +248,44 @@ class StockPriceAPI:
                         }
                         records.append(record_dict)
                 results[ticker.replace(".T", "")] = records
-            return results
-        except Exception as e:
-            print("Error fetching batch data for tickers:", e)
-            return {}
+        else:
+            # 単一ティッカーの場合の処理
+            ticker = ticker_symbols[0]
+            records = []
+            if expairy is None:
+                record = df.iloc[-1]
+                date_str = record.name.strftime("%Y%m%d")
+                record_dict = {
+                    "code": ticker.replace(".T", ""),
+                    "date": date_str,
+                    "open": float(record["Open"]),
+                    "high": float(record["High"]),
+                    "low": float(record["Low"]),
+                    "close": float(record["Close"]),
+                    "volume": int(record["Volume"]),
+                }
+                records.append(record_dict)
+            else:
+                for index, row in df.iterrows():
+                    date_str = index.strftime("%Y%m%d")
+                    record_dict = {
+                        "code": ticker.replace(".T", ""),
+                        "date": date_str,
+                        "open": float(row["Open"]),
+                        "high": float(row["High"]),
+                        "low": float(row["Low"]),
+                        "close": float(row["Close"]),
+                        "volume": int(row["Volume"]),
+                    }
+                    records.append(record_dict)
+            results[ticker.replace(".T", "")] = records
+        return results
+    except Exception as e:
+        print("Error fetching batch data for tickers:", e)
+        return {}
 
 
-def _remove_trailing_zero(code):
-    # 株式コードの末尾のゼロが存在する場合に削除します
-    return code[:-1] if code.endswith("0") else code
-
-# TODO: 時価総額追加
 # if __name__ == "__main__":
-    # stock_dao = StockDAO()
-    # stock_dao.update_market_cap("1301", 1000000000)
-    # print("OK")
+#     stock_dao = StockDAO()
+#     stock_dao.update_market_cap("1301", 1000000000)
+#     print("OK")

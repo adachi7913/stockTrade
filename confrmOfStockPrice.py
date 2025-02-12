@@ -38,11 +38,16 @@ if __name__ == "__main__":
             start_time = time.time()
             company_info = dao.fetch_company_info(stock_code)
             industry_name = TableCategory.get_table_prefix(company_info[3])
-            
+
             if os.environ.get("PRICING_PROCESS_DONE").lower() == "y":
-                stock_price_api = StockPriceAPI(
-                    stock_code, os.environ.get("FETCH_DATA_RANGE")
-                )
+                #FETCH_DATA_RANGEが設定されていない場合は、最新のデータを取得
+                if os.environ.get("FETCH_DATA_RANGE") is None: 
+                    stock_price_api = StockPriceAPI(stock_code)
+                else:
+                    #FETCH_DATA_RANGEが設定されている場合は、指定された期間のデータを取得
+                    stock_price_api = StockPriceAPI(
+                        stock_code, os.environ.get("FETCH_DATA_RANGE")
+                    )
                 price_data = stock_price_api.fetch_data_yfinance()
                 if not price_data:
                     print(f"株価データの取得に失敗しました: {stock_code}")
@@ -85,7 +90,7 @@ if __name__ == "__main__":
         # DAO を用いて銘柄コード一覧を取得
         dao = StockDAO()
         stock_codes = dao.fetch_company_code_list()
-        stock_codes = stock_codes[3305:]  # 例: 0-490はすでに取得済み
+        # stock_codes = stock_codes[3305:]  # 例: 0-490はすでに取得済み
         dao.close()
 
         # 並列処理用スレッドプールの作成
@@ -99,6 +104,7 @@ if __name__ == "__main__":
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
+                time.sleep(0.5)  # 連続リクエストを避けるためのウェイト
             except Exception as e:
                 print("タスク中の例外:", e)
     except KeyboardInterrupt:
