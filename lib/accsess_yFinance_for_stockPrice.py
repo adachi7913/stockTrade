@@ -48,10 +48,10 @@ class StockPriceAPI:
                 start_date = today - timedelta(days=int(self.expairy) * 365)
                 df = ticker.history(start=start_date, end=today)
             else:
-                # 期間を5日分取得し、最新のレコードのみを使用する
-                df = ticker.history(period="5d")
+                # 期間を60日分取得し、最新の60件分のレコードを使用する
+                df = ticker.history(period="60d")
                 if not df.empty:
-                    df = df.iloc[[-1]]
+                    df = df.iloc[-60:]
             df.fillna(0, inplace=True)
             if df.empty:
                 raise ValueError(

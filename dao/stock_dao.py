@@ -275,7 +275,7 @@ class StockDAO:
                 
             # 期間設定：本日から1年前まで
             today = date.today()
-            one_year_ago = today - timedelta(days=int(os.environ.get("FETCH_DATA_RANGE"))*365)
+            one_year_ago = today - timedelta(days=2*365) # 2年分
                 
             # SQL：価格テーブルと指標テーブルをcode, dateで結合
             query = f"""
