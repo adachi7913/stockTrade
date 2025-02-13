@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from datetime import date, timedelta, datetime
 import os
 import threading
+import math
 
 from lib.accsess_yFinance_for_stockPrice import StockPriceAPI
 from lib.indicator_calculator import IndicatorCalculator
@@ -151,18 +152,25 @@ class StockDAO:
             :param stock_code: 対象の銘柄コード
             :param table_name: 挿入先のインジケーター・テーブル名（例: "retail_indicator"）
             """
-            # スキーマ変更用DDLは実行せず、テーブル {table_name} に
-            # rsi および macd カラムが既に存在する前提で処理を続行します。
-
+            # 安全に丸めるヘルパー関数を定義
+            def safe_round(value, ndigits):
+                try:
+                    r = round(value, ndigits)
+                    return r if (isinstance(r, float) and __import__('math').isfinite(r)) else (r if not isinstance(r, float) else 0)
+                except Exception:
+                    return 0
+            
             query = f"""
             INSERT INTO {table_name} (
                 code, date,
                 ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a, ichimoku_senkou_b,
-                adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr, rsi, macd
+                adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr, rsi, macd,
+                dynamic_threshold, weekly_trend, pca_signal
             ) VALUES (
                 %(code)s, %(date)s,
                 %(tenkan)s, %(kijun)s, %(senkou_a)s, %(senkou_b)s,
-                %(adx)s, %(bb_lower)s, %(bb_middle)s, %(bb_upper)s, %(stoch_k)s, %(stoch_d)s, %(atr)s, %(rsi)s, %(macd)s
+                %(adx)s, %(bb_lower)s, %(bb_middle)s, %(bb_upper)s, %(stoch_k)s, %(stoch_d)s, %(atr)s, %(rsi)s, %(macd)s,
+                %(dynamic_threshold)s, %(weekly_trend)s, %(pca_signal)s
             )
             ON CONFLICT (code, date) DO UPDATE SET
                 ichimoku_tenkan = EXCLUDED.ichimoku_tenkan,
@@ -177,53 +185,38 @@ class StockDAO:
                 stoch_d = EXCLUDED.stoch_d,
                 atr = EXCLUDED.atr,
                 rsi = EXCLUDED.rsi,
-                macd = EXCLUDED.macd;
+                macd = EXCLUDED.macd,
+                dynamic_threshold = EXCLUDED.dynamic_threshold,
+                weekly_trend = EXCLUDED.weekly_trend,
+                pca_signal = EXCLUDED.pca_signal;
             """
             
-            for date_str, data in indicator_data.items():
-                # date_strが整数の場合もあるので、文字列に変換する
-                date_str = str(date_str)
-                # "YYYYMMDD" → "YYYY-MM-DD" 形式へ変換
-                formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
-                
-                if not isinstance(data.get('ichimoku'), dict):
-                    print(f"Warning: ichimokuがdictではありません: {data.get('ichimoku')}")
-                if not isinstance(data.get('bb'), dict):
-                    print(f"Warning: bbがdictではありません: {data.get('bb')}")
-                if not isinstance(data.get('stoch'), dict):
-                    print(f"Warning: stochがdictではありません: {data.get('stoch')}")
-
-                # 値を丸める（DECIMAL(10,2)に合わせるため、小数点以下2桁）
-                tenkan    = round(data['ichimoku']['tenkan'], 2)
-                kijun     = round(data['ichimoku']['kijun'], 2)
-                senkou_a  = round(data['ichimoku']['senkou_a'], 2)
-                senkou_b  = round(data['ichimoku']['senkou_b'], 2)
-                adx       = round(data['adx'], 2)
-                bb_lower  = round(data['bb']['lower'], 2)
-                bb_middle = round(data['bb']['middle'], 2)
-                bb_upper  = round(data['bb']['upper'], 2)
-                stoch_k   = round(data['stoch']['stoch_k'], 2)
-                stoch_d   = round(data['stoch']['stoch_d'], 2)
-                atr       = round(data['atr'], 2)
-                rsi       = round(data['rsi'], 2)
-                macd      = round(data['macd'], 2)
+            for record in indicator_data:
+                date_str = record.get("date", "")
+                if len(date_str) == 8:
+                    formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                else:
+                    formatted_date = date_str
 
                 params = {
                     "code": stock_code,
                     "date": formatted_date,
-                    "tenkan": tenkan,
-                    "kijun": kijun,
-                    "senkou_a": senkou_a,
-                    "senkou_b": senkou_b,
-                    "adx": adx,
-                    "bb_lower": bb_lower,
-                    "bb_middle": bb_middle,
-                    "bb_upper": bb_upper,
-                    "stoch_k": stoch_k,
-                    "stoch_d": stoch_d,
-                    "atr": atr,
-                    "rsi": rsi,
-                    "macd": macd
+                    "tenkan": safe_round(record.get("ichimoku_tenkan", 0), 2),
+                    "kijun": safe_round(record.get("ichimoku_kijun", 0), 2),
+                    "senkou_a": safe_round(record.get("ichimoku_senkou_a", 0), 2),
+                    "senkou_b": safe_round(record.get("ichimoku_senkou_b", 0), 2),
+                    "adx": safe_round(record.get("adx", 0), 2),
+                    "bb_lower": safe_round(record.get("bb_lower", 0), 2),
+                    "bb_middle": safe_round(record.get("bb_middle", 0), 2),
+                    "bb_upper": safe_round(record.get("bb_upper", 0), 2),
+                    "stoch_k": safe_round(record.get("stoch_k", 0), 2),
+                    "stoch_d": safe_round(record.get("stoch_d", 0), 2),
+                    "atr": safe_round(record.get("atr", 0), 2),
+                    "rsi": safe_round(record.get("rsi", 0), 2),
+                    "macd": safe_round(record.get("macd", 0), 2),
+                    "dynamic_threshold": record.get("dynamic_threshold", 0),
+                    "weekly_trend": record.get("weekly_trend", "UNKNOWN"),
+                    "pca_signal": safe_round(record.get("pca_signal", 0), 2)
                 }
 
                 self.cur.execute(query, params)
