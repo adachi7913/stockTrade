@@ -49,9 +49,9 @@ class StockPriceAPI:
                 df = ticker.history(start=start_date, end=today)
             else:
                 # 期間を60日分取得し、最新の60件分のレコードを使用する
-                df = ticker.history(period="60d")
+                df = ticker.history(period="5d")
                 if not df.empty:
-                    df = df.iloc[-60:]
+                    df = df.iloc[-1:]
             df.fillna(0, inplace=True)
             if df.empty:
                 raise ValueError(

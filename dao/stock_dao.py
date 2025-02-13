@@ -3,11 +3,14 @@ import psycopg
 from dotenv import load_dotenv
 from datetime import date, timedelta, datetime
 import os
+import threading
 
 from lib.accsess_yFinance_for_stockPrice import StockPriceAPI
 from lib.indicator_calculator import IndicatorCalculator
 from lib.table_category import TableCategory
 
+# DDLの実行を排他制御するためのグローバルロック
+DDL_LOCK = threading.Lock()
 
 class StockDAO:
     def __init__(self):
@@ -148,10 +151,8 @@ class StockDAO:
             :param stock_code: 対象の銘柄コード
             :param table_name: 挿入先のインジケーター・テーブル名（例: "retail_indicator"）
             """
-            # カラムが存在しなければ、rsi と macd カラムを追加する
-            self.cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS rsi NUMERIC;")
-            self.cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS macd NUMERIC;")
-            self.conn.commit()
+            # スキーマ変更用DDLは実行せず、テーブル {table_name} に
+            # rsi および macd カラムが既に存在する前提で処理を続行します。
 
             query = f"""
             INSERT INTO {table_name} (
@@ -287,7 +288,9 @@ class StockDAO:
                     i.adx,
                     i.bb_lower, i.bb_middle, i.bb_upper,
                     i.stoch_k, i.stoch_d,
-                    i.atr
+                    i.atr,
+                    i.rsi,
+                    i.macd
                 FROM {price_table} p
                 INNER JOIN {indicator_table} i ON p.code = i.code AND p.date = i.date
                 WHERE p.code = %(code)s
@@ -312,7 +315,7 @@ class StockDAO:
                 # 0: code, 1: date, 2: open, 3: high, 4: low, 5: close, 6: volume,
                 # 7: ichimoku_tenkan, 8: ichimoku_kijun, 9: ichimoku_senkou_a, 10: ichimoku_senkou_b,
                 # 11: adx, 12: bb_lower, 13: bb_middle, 14: bb_upper,
-                # 15: stoch_k, 16: stoch_d, 17: atr
+                # 15: stoch_k, 16: stoch_d, 17: atr, 18: rsi, 19: macd
                 record = {
                     "code": row[0],
                     "date": row[1],
@@ -337,7 +340,9 @@ class StockDAO:
                         "stoch_k": row[15],
                         "stoch_d": row[16]
                     },
-                    "atr": row[17]
+                    "atr": row[17],
+                    "rsi": row[18],
+                    "macd": row[19]
                 }
                 results.append(record)
                 
@@ -440,16 +445,7 @@ class StockDAO:
         
     def update_market_cap(self, code, market_cap):
         try:
-            # market_capカラムが存在するか確認。存在しなければ追加する
-            self.cur.execute("""
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_name = 'companies' AND column_name = 'market_cap'
-            """)
-            if self.cur.fetchone() is None:
-                self.cur.execute("ALTER TABLE companies ADD COLUMN market_cap NUMERIC;")
-                self.conn.commit()
-
+            # companies テーブルに market_cap カラムが存在する前提で処理を実行します。
             # 4桁の場合は末尾に "0" を追加
             companies_code = code + "0" if len(code) == 4 else code
 

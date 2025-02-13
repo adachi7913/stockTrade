@@ -65,7 +65,7 @@ def filter_stock(stock_code, close, market_cap, last_no_entry_date=None, no_entr
         # 直近20日分を抽出（20日未満の場合は全データ）
         recent_volumes = volume_data[-20:] if len(volume_data) >= 20 else volume_data
         avg_volume = sum(recent_volumes) / len(recent_volumes)
-        if avg_volume < 100000:
+        if avg_volume < 90000:
             print(f"{stock_code}: 過去20日の平均出来高が10万株未満（{avg_volume}株）ため除外")
             return False
 

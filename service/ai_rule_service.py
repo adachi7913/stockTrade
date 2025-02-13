@@ -63,8 +63,9 @@ def run_ai_rule_generation(start_code=None):
                 atr = float(latest_record.get("atr", 0))
                 rsi_val = float(latest_record.get("rsi", 0))
                 stoch_k = float(latest_record.get("stoch", {}).get("stoch_k", 0))
+                # print("latest_record:", latest_record)
                 if not filter_stock(stock_code, close_price, market_cap, last_entry_date, no_entry_span, volume_data, atr, rsi_val, stoch_k):
-                    print(f"{stock_code}: フィルターによりGemini APIリクエスト対象外")
+                    # print(f"{stock_code}: フィルターによりGemini APIリクエスト対象外")
                     return
 
                 # --- Gemini API 呼び出し ---
@@ -102,4 +103,4 @@ def run_ai_rule_generation(start_code=None):
 
 if __name__ == "__main__":
     # 必要に応じて開始銘柄コードを設定します（例："27820"）
-    run_ai_rule_generation(start_code="27820") 
+    run_ai_rule_generation(start_code="99970") 
