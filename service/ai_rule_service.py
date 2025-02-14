@@ -80,6 +80,7 @@ def run_ai_rule_generation(start_code=None):
                     logging.warning(f"{stock_code}: Gemini APIエラー発生のためスキップ")
                     return
 
+                logging.info("銘柄コード: %s", stock_code)
                 logging.info("Gemini API response: %s", response)
                 insert_data = parse_response(full_data, response)
                 if not insert_data:

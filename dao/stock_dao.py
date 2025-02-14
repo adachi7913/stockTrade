@@ -283,7 +283,10 @@ class StockDAO:
                     i.stoch_k, i.stoch_d,
                     i.atr,
                     i.rsi,
-                    i.macd
+                    i.macd,
+                    i.dynamic_threshold,
+                    i.weekly_trend,
+                    i.pca_signal
                 FROM {price_table} p
                 INNER JOIN {indicator_table} i ON p.code = i.code AND p.date = i.date
                 WHERE p.code = %(code)s
@@ -309,6 +312,7 @@ class StockDAO:
                 # 7: ichimoku_tenkan, 8: ichimoku_kijun, 9: ichimoku_senkou_a, 10: ichimoku_senkou_b,
                 # 11: adx, 12: bb_lower, 13: bb_middle, 14: bb_upper,
                 # 15: stoch_k, 16: stoch_d, 17: atr, 18: rsi, 19: macd
+                # 20: dynamic_threshold, 21: weekly_trend, 22: pca_signal
                 record = {
                     "code": row[0],
                     "date": row[1],
@@ -335,7 +339,10 @@ class StockDAO:
                     },
                     "atr": row[17],
                     "rsi": row[18],
-                    "macd": row[19]
+                    "macd": row[19],
+                    "dynamic_threshold": row[20],
+                    "weekly_trend": row[21],
+                    "pca_signal": row[22]
                 }
                 results.append(record)
                 

@@ -29,7 +29,7 @@ def process_stock(stock_code):
         # 環境変数による処理モードの判定
         pricing_flag = os.environ.get("PRICING_PROCESS_DONE", "n").lower() == "y"
         indicator_flag = os.environ.get("INDICATOR_PROCESS_DONE", "n").lower() == "y"
-        fetch_range = os.environ.get("FETCH_DATA_RANGE", "")
+        fetch_range = (int(os.environ.get("FETCH_DATA_RANGE", ""))*365)+73
 
         if pricing_flag:
             if fetch_range == "":
