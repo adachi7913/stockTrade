@@ -3,6 +3,7 @@ import sys
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
+import logging
 
 
 class StockPriceAPI:
@@ -24,7 +25,7 @@ class StockPriceAPI:
         """
         yfinance API を使用して株価データを取得するメソッド。
 
-        - expairy が指定されている場合、今日から expairy 年前までのデータを取得します。
+        - expairy が指定されている場合、今日から expairy 日前までのデータを取得します。
         - expairy が指定されていない場合、最新の1件のみを取得します。
 
         Returns:
@@ -34,54 +35,58 @@ class StockPriceAPI:
             today = datetime.now()
             yf_code = self.code + ".T"
             ticker = yf.Ticker(yf_code)
-            # DB更新用の処理: 時価総額の取得と companies テーブルへの反映
             ticker_info = ticker.info
             market_cap = ticker_info.get("marketCap")
             if market_cap is not None:
                 from dao.stock_dao import StockDAO
-
                 stock_dao = StockDAO()
                 stock_dao.update_market_cap(self.code, market_cap)
                 stock_dao.close()
 
             if self.expairy is not None:
-                start_date = today - timedelta(days=int(self.expairy) * 365)
+                # confirmOfStockPrice用：指定された日数分のデータを取得
+                start_date = today - timedelta(days=int(self.expairy))
                 df = ticker.history(start=start_date, end=today)
             else:
-                # 期間を60日分取得し、最新の60件分のレコードを使用する
+                # daily_update用：5日分のデータを取得
                 df = ticker.history(period="5d")
-                if not df.empty:
-                    df = df.iloc[-1:]
-            df.fillna(0, inplace=True)
+
             if df.empty:
-                raise ValueError(
-                    f"No data retrieved for code {yf_code} from yfinance API."
-                )
+                raise ValueError(f"No valid data for code {yf_code}")
 
             data = []
             for index, row in df.iterrows():
-                # 出来高の値が空文字の場合は 0 として扱う
+                # 出来高のバリデーション
                 vol = row["Volume"]
-                if isinstance(vol, str):
-                    vol = vol.strip()
-                    if vol == "":
-                        vol_value = 0
-                    else:
-                        vol_value = int(vol)
-                else:
-                    vol_value = int(vol)
+                if pd.isna(vol) or vol == 0:
+                    # logging.warning(f"Invalid volume data detected for {yf_code} on {index}")
+                    continue
+                
+                # 価格データのバリデーション
+                price_cols = ["Open", "High", "Low", "Close"]
+                if any(pd.isna(row[col]) or row[col] <= 0 for col in price_cols):
+                    logging.warning(f"Invalid price data detected for {yf_code} on {index}")
+                    continue
+                
+                # 値の整合性チェック
+                if not (row["Low"] <= row["Open"] <= row["High"] and 
+                       row["Low"] <= row["Close"] <= row["High"]):
+                    logging.warning(f"Inconsistent OHLC data for {yf_code} on {index}")
+                    continue
 
-                data.append(
-                    {
-                        "code": self.code,
-                        "date": index.strftime("%Y%m%d"),
-                        "open": float(row["Open"]),
-                        "high": float(row["High"]),
-                        "low": float(row["Low"]),
-                        "close": float(row["Close"]),
-                        "volume": vol_value,
-                    }
-                )
+                data.append({
+                    "code": self.code,
+                    "date": index.strftime("%Y%m%d"),
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                    "volume": int(vol),
+                })
+
+            if not data:
+                raise ValueError(f"No valid records after validation for {yf_code}")
+                
             return data
         except Exception as e:
             print(f"Error fetching data for {self.code} from yfinance API: {e}")

@@ -1,54 +1,44 @@
-import time
+#!/usr/bin/env python3
+import logging
 import os
-from dotenv import load_dotenv
-from lib.accsess_yFinance_for_stockPrice import StockPriceAPI
-from lib.indicator_calculator import IndicatorCalculator
-from dao.stock_dao import StockDAO
-from lib.table_category import TableCategory
+import datetime
+import glob
+import time
+from service.stock_service import run_stock_service
 
-def process_stock(stock_code):
-    load_dotenv(override=True)
-    dao = StockDAO()
-    try:
-        start_time = time.time()
-        # StockPriceAPI を用いて最新の1件のみ取得（period="1d" として最新のデータに限定）
-        stock_price_api = StockPriceAPI(stock_code)
-        price_data = stock_price_api.fetch_data_yfinance()
-        if not price_data:
-            print(f"株価データの取得に失敗しました: {stock_code}")
-            return
+def setup_logging(log_type):
+    today = datetime.datetime.now()
+    year = today.strftime("%Y")
+    month = today.strftime("%m")
+    day = today.strftime("%d")
+    log_dir = os.path.join("log", year, month)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    # ファイル名は dd_stockPrice.log の形式
+    log_file = os.path.join(log_dir, f"{day}_daily.log")
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    if logger.hasHandlers():
+        logger.handlers.clear()
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+    return logger
 
-        indi_instance = IndicatorCalculator(price_data)
-        indicator = indi_instance.get_indicators()
-        
-        company_info = dao.fetch_company_info(stock_code)
-        if not company_info:
-            print(f"企業情報取得失敗: {stock_code}")
-            return
-        industry_name = TableCategory.get_table_prefix(company_info[3])
-        
-        dao.insert_indicator_data(indicator, stock_code, industry_name)
-        print("end insert_indicator_data")
-        
-        for price in price_data:
-            dao.insert_stock_price_data(price, industry_name)
-        print("end insert_stock_price_data")
-        
-        end_time = time.time()
-        elapsed = end_time - start_time
-        print(f"[ログ] 銘柄 {stock_code} の処理時間: {elapsed:.2f} 秒")
-    except Exception as e:
-        print(f"エラー({stock_code}): {e}")
-    finally:
-        dao.close()
+def cleanup_old_logs(log_type):
+    now = time.time()
+    # ログファイルパターン: /log/**/ *_[stockPrice].log
+    pattern = os.path.join("log", "**", "*_daily.log")
+    for file in glob.glob(pattern, recursive=True):
+        if os.path.isfile(file) and now - os.path.getmtime(file) > 7 * 24 * 3600:
+            os.remove(file)
 
 if __name__ == "__main__":
-    load_dotenv(override=True)
-    dao = StockDAO()
-    # すべての銘柄を取得
-    stock_codes = dao.fetch_company_code_list()
-    dao.close()
-    print(f"[ログ] 総{len(stock_codes)}件の銘柄を処理します。")
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-         executor.map(process_stock, stock_codes)
+    cleanup_old_logs("daily")
+    logger = setup_logging("daily")
+    logger.info("Daily Service Starting")
+    run_stock_service()  # expiry=None（デフォルト値）で5日分のデータ取得 

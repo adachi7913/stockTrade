@@ -55,7 +55,13 @@ def run_ai_rule_generation(start_code=None):
                 market_cap = dao.fetch_market_cap(stock_code)
                 no_entry_info = dao.fetch_no_entry_info(stock_code)
                 if no_entry_info is not None:
-                    last_entry_date, no_entry_span = no_entry_info
+                    if isinstance(no_entry_info, tuple):
+                        last_entry_date, no_entry_span = no_entry_info
+                    elif isinstance(no_entry_info, int):
+                        last_entry_date, no_entry_span = None, no_entry_info
+                    else:
+                        logging.error(f"{stock_code}: 予期しない形式の no_entry_info: {no_entry_info}")
+                        last_entry_date, no_entry_span = None, None
                 else:
                     last_entry_date, no_entry_span = None, None
 

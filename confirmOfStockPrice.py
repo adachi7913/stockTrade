@@ -41,4 +41,5 @@ if __name__ == "__main__":
     cleanup_old_logs("stockPrice")
     logger = setup_logging("stockPrice")
     logger.info("Stock Service Starting")
-    run_stock_service() 
+    fetch_range = os.environ.get("FETCH_DATA_RANGE")
+    run_stock_service(expiry=fetch_range)  # FETCH_DATA_RANGEの値を渡す 

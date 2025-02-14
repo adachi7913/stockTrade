@@ -1,14 +1,20 @@
+import sys
+import os
+
+# プロジェクトのルートディレクトリをsys.pathに追加する
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import time
 import psycopg
 from dotenv import load_dotenv
 from datetime import date, timedelta, datetime
-import os
 import threading
 import math
 
-from lib.accsess_yFinance_for_stockPrice import StockPriceAPI
-from lib.indicator_calculator import IndicatorCalculator
-from lib.table_category import TableCategory
+
+
 
 # DDLの実行を排他制御するためのグローバルロック
 DDL_LOCK = threading.Lock()
@@ -269,7 +275,7 @@ class StockDAO:
                 
             # 期間設定：本日から1年前まで
             today = date.today()
-            one_year_ago = today - timedelta(days=2*365) # 2年分
+            one_year_ago = today - timedelta(days=(int(os.getenv("FETCH_DATA_RANGE"))-1)*365) # 2年分
                 
             # SQL：価格テーブルと指標テーブルをcode, dateで結合
             query = f"""
@@ -384,35 +390,33 @@ class StockDAO:
           - date: 日付 (例: "2023-10-12") ※ YYYY-MM-DD 形式
           - code: 証券コード (例: "7203")
           - close: 前日の終値 (例: 1500.25)
-          - isEntry: エントリー可否 (例: "可能" または "不可")
-          - reason: エントリー判断の理由 (例: "株価がボリンジャーバンド下限に接近しているため")
+          - entry_score: エントリー判断スコア (例: 850)
+          - reason: エントリー判断の理由 (例: "各指標が好調で、リスクリワード比も2.5と良好...")
           - rule_entry_price: エントリー価格帯 (例: "1360-1370")
           - rule_stop_limit: SL価格 (例: "1330")
           - rule_top_price: 利確目標 (例: "1390-1395")
           - rule_period: 推奨保有期間 (例: "数日～1週間")
-          - riskReward: リスクリワード (例: "2.0" または "NG")
-          - score: スコア (例: 75)
+          - riskReward: リスクリワード (例: "2.5")
           - no_entry_span: 再評価までの期間（日数、例: 7）
         """
         query = """
         INSERT INTO api_response (
-            date, code, close, isEntry, reason, 
-            rule_entry_price, rule_stop_limit, rule_top_price, rule_period, risk_reward, score, no_entry_span, update_when
+            date, code, close, entry_score, reason, 
+            rule_entry_price, rule_stop_limit, rule_top_price, rule_period, risk_reward, no_entry_span, update_when
         ) VALUES (
-            %(date)s, %(code)s, %(close)s, %(isEntry)s, %(reason)s, 
-            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(score)s, %(no_entry_span)s, %(update_when)s
+            %(date)s, %(code)s, %(close)s, %(entry_score)s, %(reason)s, 
+            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(no_entry_span)s, %(update_when)s
         )
         ON CONFLICT (code) DO UPDATE SET
             date = EXCLUDED.date,
             close = EXCLUDED.close,
-            isEntry = EXCLUDED.isEntry,
+            entry_score = EXCLUDED.entry_score,
             reason = EXCLUDED.reason,
             rule_entry_price = EXCLUDED.rule_entry_price,
             rule_stop_limit = EXCLUDED.rule_stop_limit,
             rule_top_price = EXCLUDED.rule_top_price,
             rule_period = EXCLUDED.rule_period,
             risk_reward = EXCLUDED.risk_reward,
-            score = EXCLUDED.score,
             no_entry_span = EXCLUDED.no_entry_span,
             update_when = EXCLUDED.update_when;
         """
@@ -427,20 +431,20 @@ class StockDAO:
     
     def fetch_ok_api_responses(self):
         """
-        api_response テーブルから isEntry が "OK" のレコードのみを取得するメソッド
+        api_response テーブルからエントリースコアが高いレコードのみを取得するメソッド
         戻り値は取得したレコードのリスト（タプルのリスト）です。
         """
         query = """
         SELECT *
         FROM api_response
-        WHERE isEntry = 'OK';
+        WHERE entry_score >= 700;  -- エントリースコアが700以上のものを「有望」とみなす
         """
         try:
             self.cur.execute(query)
             records = self.cur.fetchall()
             return records
         except Exception as e:
-            print("api_responseテーブルからOKのレコード取得エラー:", e)
+            print("api_responseテーブルから有望なレコード取得エラー:", e)
             return []
         
     def update_market_cap(self, code, market_cap):
@@ -474,21 +478,40 @@ class StockDAO:
 
     def fetch_no_entry_info(self, stock_code):
         """
-        api_response テーブルから最新のエントリー不可情報（date, no_entry_span）を取得します。
-        返り値は (date, no_entry_span) のタプルまたは None です。
-        ※ date は文字列 "YYYY-MM-DD" として保存されている前提です。
+        api_response テーブルから最新のエントリー不可情報のno_entry_spanを取得します。
+        返り値は整数値のno_entry_spanまたはNoneです。
         """
         try:
+            # 4桁の場合は末尾に "0" を追加（他のメソッドと同様の処理）
+            api_code = stock_code[:-1] if stock_code.endswith("0") else stock_code
+            
             query = """
-                SELECT date, no_entry_span
+                SELECT no_entry_span
                 FROM api_response
                 WHERE code = %s
-                ORDER BY date DESC
+                  AND no_entry_span IS NOT NULL
+                  AND entry_score < 700  -- isEntryを entry_score < 700 に変更
+                ORDER BY date DESC, update_when DESC
                 LIMIT 1;
             """
-            self.cur.execute(query, (stock_code,))
+            self.cur.execute(query, (api_code,))
             result = self.cur.fetchone()
-            return result  # (date, no_entry_span) または None
+            
+            if result is not None:
+                return result[0]  # 整数値のno_entry_spanを返す
+            return None
+            
         except Exception as e:
             print(f"no_entry情報取得エラー({stock_code}): {e}")
             return None
+
+if __name__ == "__main__":
+    dao = StockDAO()
+    info = dao.fetch_company_info("39630")
+    print("info: ", info)
+
+    from lib.table_category import TableCategory
+    name = TableCategory.get_table_prefix(info[3])
+    print("name: ", name)
+    print(dao.get_stock_full_data_period("3963", name))
+    print(dao.fetch_no_entry_info("3978"))
