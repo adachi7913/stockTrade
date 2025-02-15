@@ -28,7 +28,7 @@ def setup_logging():
     )
     return logging.getLogger(__name__)
 
-class browser_use_test:
+class BrowserUse:
     def __init__(self):
         self.client = Client("http://localhost:7788/")
         self.logger = setup_logging()
@@ -39,16 +39,31 @@ class browser_use_test:
         login_password = os.environ.get("SBI_LOGIN_PASSWORD")
         self.logger.info("login_password: [MASKED]")
         prompt = f"""【タスク】
-        1.SBI証券（https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLEThmR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLEThmR001Control&_ActionID=DefaultAID&getFlg=on）にアクセスして
-        2.ユーザーネームに{user_name}を入力、パスワードに{login_password}を入力してログインして
-        3.ポートフォリオにアクセスしてください
-        4.ポートフォリオの銘柄コード（整数）と現在価格を取得して、**Pythonの辞書型**で返してください
-        **サンプル：
+        1. 現在のブラウザの状態を確認してください。
+
+        2. SBI証券のページが開いていない場合は、以下のURLにアクセスしてください：
+           https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLEThmR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLEThmR001Control&_ActionID=DefaultAID&getFlg=on
+
+        3. ログインしていない場合は、以下の認証情報でログインしてください：
+           ユーザーネーム: {user_name}
+           パスワード: {login_password}
+
+        4. ポートフォリオページにアクセスしてください。
+           すでにポートフォリオページが表示されている場合は、ページの更新（リロード）を行ってください。
+
+        5. ポートフォリオから以下の情報を取得してください：
+           - 銘柄コード（整数）
+           - 現在価格
+           取得した情報は**Pythonの辞書型**で返してください。
+
+        **出力形式：
         {{
             "1301": "1000",
             "1302": "2000",
             "1303": "3000"
         }}**
+
+        ※ブラウザの状態に応じて、不要なステップはスキップしてください。
         """
         return prompt
 
@@ -249,8 +264,8 @@ class browser_use_test:
             return None
 
 if __name__ == "__main__":
-    test = browser_use_test()
-    response = test.run(test._get_prompt())
+    browser_use = BrowserUse()
+    response = browser_use.run(browser_use._get_prompt())
     if response:
         print("取得した株価データ:", response)
     else:

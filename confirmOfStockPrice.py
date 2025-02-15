@@ -4,6 +4,7 @@ import os
 import datetime
 import glob
 import time
+import sys
 from service.stock_service import run_stock_service
 
 def setup_logging(log_type):
@@ -42,4 +43,11 @@ if __name__ == "__main__":
     logger = setup_logging("stockPrice")
     logger.info("Stock Service Starting")
     fetch_range = os.environ.get("FETCH_DATA_RANGE")
-    run_stock_service(expiry=fetch_range)  # FETCH_DATA_RANGEの値を渡す 
+    
+    # コマンドライン引数から開始銘柄コードを取得
+    start_code = None
+    if len(sys.argv) > 1:
+        start_code = sys.argv[1]
+        logger.info(f"開始銘柄コード: {start_code}")
+    
+    run_stock_service(expiry=fetch_range, start_code=start_code)  # 開始銘柄コードを渡す 

@@ -204,7 +204,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
         except Exception:
             pass
 
-def run_stock_service(expiry=None):
+def run_stock_service(expiry=None, start_code=None):
     load_dotenv(override=True)
     init_db_pool()
     
@@ -215,6 +215,15 @@ def run_stock_service(expiry=None):
     if not stock_codes:
         logging.error("銘柄コードの取得に失敗しました。")
         return
+
+    # 開始銘柄コードが指定されている場合、そこから処理を開始
+    if start_code:
+        try:
+            start_index = stock_codes.index(start_code)
+            stock_codes = stock_codes[start_index:]
+            logging.info(f"銘柄コード {start_code} から処理を開始します。残り {len(stock_codes)} 銘柄")
+        except ValueError:
+            logging.warning(f"指定された銘柄コード {start_code} が見つかりません。最初から処理を開始します。")
 
     logging.info(f"処理対象の銘柄コード: {stock_codes}")
 
