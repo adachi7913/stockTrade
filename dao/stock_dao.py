@@ -231,8 +231,9 @@ class StockDAO:
             print(f"エラー発生: {e}")    
     
 
-    def get_stock_full_data_period(self,stock_code, industry_name):
-        stock_code = stock_code[:-1] if stock_code.endswith("0") else stock_code
+    def get_stock_full_data_period(self, stock_code, industry_name):
+        # stock_codeが５桁でかつ末尾が'0'なら、末尾の'0'を除く
+        stock_code = stock_code[:-1] if len(stock_code) == 5 and stock_code.endswith("0") else stock_code
         """
         株価コードと業種名を引数に、DBから現在から1年前までのデータを配列で取得し、
         以下の構成でレスポンスする:
@@ -275,8 +276,9 @@ class StockDAO:
                 
             # 期間設定：本日から1年前まで
             today = date.today()
-            one_year_ago = today - timedelta(days=(int(os.getenv("FETCH_DATA_RANGE"))-1)*365) # 2年分
-                
+            print("today: ", today)
+            one_year_ago = today - timedelta(days=(int(os.getenv("FETCH_DATA_RANGE")))*365) # 2年分
+            print("one_year_ago: ", one_year_ago)
             # SQL：価格テーブルと指標テーブルをcode, dateで結合
             query = f"""
                 SELECT
@@ -387,38 +389,43 @@ class StockDAO:
         APIレスポンスのデータを挿入または更新するメソッド
         
         response_data は以下のキーを含む辞書である必要があります:
-          - date: 日付 (例: "2023-10-12") ※ YYYY-MM-DD 形式
+          - date: 日付 (例: "2023-10-12")
           - code: 証券コード (例: "7203")
           - close: 前日の終値 (例: 1500.25)
-          - entry_score: エントリー判断スコア (例: 850)
-          - reason: エントリー判断の理由 (例: "各指標が好調で、リスクリワード比も2.5と良好...")
-          - rule_entry_price: エントリー価格帯 (例: "1360-1370")
+          - rule_entry_price: エントリー価格 (例: "1360-1370" もしくは金額のみ)
           - rule_stop_limit: SL価格 (例: "1330")
-          - rule_top_price: 利確目標 (例: "1390-1395")
+          - rule_top_price: 利確目標 (例: "1390-1395" もしくは金額のみ)
           - rule_period: 推奨保有期間 (例: "数日～1週間")
-          - riskReward: リスクリワード (例: "2.5")
+          - risk_reward: リスクリワード (例: "2.5")
           - no_entry_span: 再評価までの期間（日数、例: 7）
+          - update_when: 更新日時
+          - entry_score: エントリー判断スコア (例: 850)
+          - expected_return: 想定リターン (例: 利確目標 - エントリー価格 の計算結果)
+          - reason: エントリー判断の理由
         """
         query = """
-        INSERT INTO api_response (
-            date, code, close, entry_score, reason, 
-            rule_entry_price, rule_stop_limit, rule_top_price, rule_period, risk_reward, no_entry_span, update_when
-        ) VALUES (
-            %(date)s, %(code)s, %(close)s, %(entry_score)s, %(reason)s, 
-            %(rule_entry_price)s, %(rule_stop_limit)s, %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(no_entry_span)s, %(update_when)s
-        )
-        ON CONFLICT (code) DO UPDATE SET
-            date = EXCLUDED.date,
-            close = EXCLUDED.close,
-            entry_score = EXCLUDED.entry_score,
-            reason = EXCLUDED.reason,
-            rule_entry_price = EXCLUDED.rule_entry_price,
-            rule_stop_limit = EXCLUDED.rule_stop_limit,
-            rule_top_price = EXCLUDED.rule_top_price,
-            rule_period = EXCLUDED.rule_period,
-            risk_reward = EXCLUDED.risk_reward,
-            no_entry_span = EXCLUDED.no_entry_span,
-            update_when = EXCLUDED.update_when;
+            INSERT INTO api_response (
+                date, code, close, rule_entry_price, rule_stop_limit, 
+                rule_top_price, rule_period, risk_reward, no_entry_span, 
+                update_when, entry_score, expected_return, reason
+            ) VALUES (
+                %(date)s, %(code)s, %(close)s, %(rule_entry_price)s, %(rule_stop_limit)s,
+                %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(no_entry_span)s,
+                %(update_when)s, %(entry_score)s, %(expected_return)s, %(reason)s
+            )
+            ON CONFLICT (code) DO UPDATE SET
+                date = EXCLUDED.date,
+                close = EXCLUDED.close,
+                rule_entry_price = EXCLUDED.rule_entry_price,
+                rule_stop_limit = EXCLUDED.rule_stop_limit,
+                rule_top_price = EXCLUDED.rule_top_price,
+                rule_period = EXCLUDED.rule_period,
+                risk_reward = EXCLUDED.risk_reward,
+                no_entry_span = EXCLUDED.no_entry_span,
+                update_when = EXCLUDED.update_when,
+                entry_score = EXCLUDED.entry_score,
+                expected_return = EXCLUDED.expected_return,
+                reason = EXCLUDED.reason;
         """
         
         from datetime import datetime
@@ -506,12 +513,13 @@ class StockDAO:
             return None
 
 if __name__ == "__main__":
+    code = "1860"
     dao = StockDAO()
-    info = dao.fetch_company_info("39630")
+    info = dao.fetch_company_info(code + "0")
     print("info: ", info)
 
     from lib.table_category import TableCategory
     name = TableCategory.get_table_prefix(info[3])
     print("name: ", name)
-    print(dao.get_stock_full_data_period("3963", name))
-    print(dao.fetch_no_entry_info("3978"))
+    print(dao.get_stock_full_data_period(code, name))
+    # print(dao.fetch_no_entry_info("3978"))
