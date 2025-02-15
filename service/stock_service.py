@@ -240,7 +240,7 @@ def run_stock_service(expiry=None):
         # confirmOfStockPrice用の設定（FETCH_DATA_RANGE年分）
         years = int(expiry)
         business_days = years * 252
-        extra_days = 73
+        extra_days = 90
         fetch_range = (years * 365) + extra_days
         expected_days = business_days + 52
         logging.info(f"全期間取得モード: {years}年分のデータを取得します")

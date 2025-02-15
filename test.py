@@ -1,34 +1,261 @@
+import json
+import logging
+import re
 from gradio_client import Client
+import os
+from dotenv import load_dotenv
+from datetime import datetime
 
-# Gradio サーバーのエンドポイント URL を指定して Client を生成
-client = Client("http://localhost:7788/")
+# .envファイルをロード
+load_dotenv()
 
-# /run_with_stream API を呼び出すためのパラメータを設定して実行
-result = client.predict(
-    agent_type="custom",                        # エージェントタイプ。'custom' 又は 'org'
-    llm_provider="openai",                        # LLM プロバイダー。例: "openai"
-    llm_model_name="gpt-4o",                      # 使用するモデル名。例: "gpt-4o"
-    llm_temperature=1,                            # 温度パラメータ
-    llm_base_url="",                              # ベース URL（必要に応じて）
-    llm_api_key="",                               # API キー（必要に応じて）
-    use_own_browser=False,                        # ブラウザ利用オプション
-    keep_browser_open=True,                       # ブラウザを開いたままにするかどうか
-    headless=False,                               # ヘッドレスモードかどうか
-    disable_security=True,                        # セキュリティ機能の無効化
-    window_w=1280,                                # ブラウザウィンドウの幅
-    window_h=1100,                                # ブラウザウィンドウの高さ
-    save_recording_path="./tmp/record_videos",    # 録画ファイルの保存パス
-    save_agent_history_path="./tmp/agent_history",# エージェント履歴の保存パス
-    save_trace_path="./tmp/traces",               # トレースファイルの保存パス
-    enable_recording=True,                        # 録画を有効にするかどうか
-    task="go to google.com and type 'OpenAI' click search and give me the first url",  # 実行タスクの内容
-    add_infos="Hello!!",                          # 補足情報。必須項目です
-    max_steps=100,                                # 最大実行ステップ数
-    use_vision=True,                              # ビジョン機能の使用有無
-    max_actions_per_step=10,                      # 1ステップあたりの最大アクション数
-    tool_call_in_content=True,                    # ツールコールをコンテンツ内で使用するかどうか
-    api_name="/run_with_stream"                   # 実行する API エンドポイント
-)
+# ロギングの設定
+def setup_logging():
+    log_dir = "log"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(log_dir, f"sbi_scraping_{current_time}.log")
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger(__name__)
 
-# API の結果を出力
-print(result)
+class browser_use_test:
+    def __init__(self):
+        self.client = Client("http://localhost:7788/")
+        self.logger = setup_logging()
+
+    def _get_prompt(self):
+        user_name = os.environ.get("SBI_USER_NAME")
+        self.logger.info(f"user_name: {user_name}")
+        login_password = os.environ.get("SBI_LOGIN_PASSWORD")
+        self.logger.info("login_password: [MASKED]")
+        prompt = f"""【タスク】
+        1.SBI証券（https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLEThmR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLEThmR001Control&_ActionID=DefaultAID&getFlg=on）にアクセスして
+        2.ユーザーネームに{user_name}を入力、パスワードに{login_password}を入力してログインして
+        3.ポートフォリオにアクセスしてください
+        4.ポートフォリオの銘柄コード（整数）と現在価格を取得して、**Pythonの辞書型**で返してください
+        **サンプル：
+        {{
+            "1301": "1000",
+            "1302": "2000",
+            "1303": "3000"
+        }}**
+        """
+        return prompt
+
+    def is_valid_stock_data(self, data):
+        """株価データの形式が正しいかチェックする"""
+        if not isinstance(data, dict):
+            return False
+        
+        for code, price in data.items():
+            # コードが文字列で数字のみで構成されているか確認
+            if not isinstance(code, str) or not code.isdigit():
+                return False
+            # 価格が文字列または数値で、数値に変換可能か確認
+            if not (isinstance(price, (str, int)) and str(price).isdigit()):
+                return False
+        return True
+
+    def normalize_json_string(self, text):
+        """JSON文字列を正規化する"""
+        # バックスラッシュとエスケープシーケンスを処理
+        text = text.replace('\\n', ' ').replace('\\', '')
+        # 余分な空白を削除
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+
+    def extract_dict_from_response(self, response_str):
+        """レスポンス文字列から辞書データを抽出する"""
+        self.logger.info(f"辞書抽出を試行: {response_str}")
+        
+        try:
+            # 1. 完全なJSONとして解析を試みる
+            try:
+                normalized = self.normalize_json_string(response_str)
+                data = json.loads(normalized)
+                if self.is_valid_stock_data(data):
+                    converted_data = {k: int(v) for k, v in data.items()}
+                    self.logger.info(f"完全なJSONとして抽出成功: {converted_data}")
+                    return converted_data
+            except json.JSONDecodeError:
+                pass
+
+            # 2. JSON形式の文字列を探す
+            json_pattern = r'\{[^{}]*"[^"]+"\s*:\s*"[^"]+\"[^{}]*\}'
+            matches = re.findall(json_pattern, response_str)
+            
+            for match in matches:
+                try:
+                    normalized = self.normalize_json_string(match)
+                    data = json.loads(normalized)
+                    if self.is_valid_stock_data(data):
+                        converted_data = {k: int(v) for k, v in data.items()}
+                        self.logger.info(f"JSON文字列として抽出成功: {converted_data}")
+                        return converted_data
+                except json.JSONDecodeError:
+                    continue
+
+            # 3. 'done'フィールド内のテキストを確認
+            done_pattern = r'text\':\s*\'(\{[^}]+\})\''
+            done_matches = re.findall(done_pattern, response_str)
+            
+            for match in done_matches:
+                try:
+                    normalized = self.normalize_json_string(match)
+                    data = json.loads(normalized)
+                    if self.is_valid_stock_data(data):
+                        converted_data = {k: int(v) for k, v in data.items()}
+                        self.logger.info(f"doneフィールドから抽出成功: {converted_data}")
+                        return converted_data
+                except json.JSONDecodeError:
+                    continue
+
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"辞書抽出中に予期せぬエラーが発生: {str(e)}")
+            return None
+
+    def extract_stock_data_from_text(self, text):
+        """テキストから株価データを抽出する"""
+        try:
+            self.logger.info(f"テキストからの抽出を開始: {text}")
+            
+            # 'done'フィールドのテキストから直接抽出を試みる
+            if isinstance(text, dict):
+                if 'done' in text and 'text' in text['done']:
+                    result = self.extract_dict_from_response(text['done']['text'])
+                    if result:
+                        return result
+                # 辞書全体を文字列として処理
+                text = str(text)
+            
+            # コロンで区切られたテキストの場合、最後の部分を使用
+            if ":" in text:
+                parts = text.split(":")
+                # 最後の部分に辞書が含まれている可能性が高いため、最後の部分を使用
+                text = parts[-1].strip()
+            
+            # 辞書形式のデータを抽出
+            result = self.extract_dict_from_response(text)
+            if result:
+                return result
+            
+            return None
+        except Exception as e:
+            self.logger.error(f"テキストからの抽出に失敗: {e}, テキスト: {text}")
+            return None
+
+    def process_response_item(self, item):
+        """レスポンスの各アイテムを処理する"""
+        try:
+            if item is None:
+                return None
+
+            # 文字列の場合
+            if isinstance(item, str):
+                # 直接JSON解析を試みる
+                try:
+                    data = json.loads(item)
+                    if self.is_valid_stock_data(data):
+                        converted_data = {k: int(v) for k, v in data.items()}
+                        self.logger.info(f"直接JSON解析成功: {converted_data}")
+                        return converted_data
+                except json.JSONDecodeError:
+                    pass
+
+                # テキストから抽出を試みる
+                return self.extract_stock_data_from_text(item)
+
+            # 辞書の場合
+            elif isinstance(item, dict):
+                if 'done' in item and 'text' in item['done']:
+                    text = item['done']['text']
+                    try:
+                        data = json.loads(text)
+                        if self.is_valid_stock_data(data):
+                            converted_data = {k: int(v) for k, v in data.items()}
+                            self.logger.info(f"done.textから直接抽出成功: {converted_data}")
+                            return converted_data
+                    except json.JSONDecodeError:
+                        return self.extract_stock_data_from_text(text)
+
+            return None
+        except Exception as e:
+            self.logger.error(f"アイテム処理中にエラーが発生: {str(e)}")
+            return None
+
+    def run(self, task):
+        self.logger.info("タスクを開始します")
+        response = self.client.predict(
+            agent_type="custom",                        # エージェントタイプ。'custom' 又は 'org'
+            llm_provider="gemini",                        # LLM プロバイダー。例: "openai"
+            llm_model_name=os.environ.get("GEMINI_THINKING_MODEL"),                      # 使用するモデル名。例: "gpt-4o"
+            llm_temperature=1,                            # 温度パラメータ
+            llm_base_url="",                              # ベース URL（必要に応じて）
+            llm_api_key=os.environ.get("GEMINI_API_KEY2"),                               # API キー（必要に応じて）
+            use_own_browser=True,                        # ブラウザ利用オプション
+            keep_browser_open=True,                       # ブラウザを開いたままにするかどうか
+            headless=True,                               # ヘッドレスモードかどうか
+            disable_security=True,                        # セキュリティ機能の無効化
+            window_w=1280,                                # ブラウザウィンドウの幅
+            window_h=1100,                                # ブラウザウィンドウの高さ
+            save_recording_path="./tmp/record_videos",    # 録画ファイルの保存パス
+            save_agent_history_path="./tmp/agent_history",# エージェント履歴の保存パス
+            save_trace_path="./tmp/traces",               # トレースファイルの保存パス
+            enable_recording=True,                        # 録画を有効にするかどうか
+            task=task,                                    # 実行タスクの内容
+            add_infos="Hello!!",                          # 補足情報。必須項目です
+            max_steps=100,                                # 最大実行ステップ数
+            use_vision=True,                              # ビジョン機能の使用有無
+            max_actions_per_step=10,                      # 1ステップあたりの最大アクション数
+            tool_call_in_content=True,                    # ツールコールをコンテンツ内で使用するかどうか
+            api_name="/run_with_stream"                   # 実行する API エンドポイント
+        )
+        
+        # レスポンスの内容をログに記録
+        self.logger.info("レスポンスを受信:")
+        self.logger.info(f"レスポンスの型: {type(response)}")
+        
+        try:
+            if isinstance(response, (list, tuple)):
+                self.logger.info(f"レスポンスの要素数: {len(response)}")
+                
+                # 各要素を処理
+                for i, item in enumerate(response):
+                    self.logger.info(f"要素[{i}]の処理を開始:")
+                    self.logger.info(f"要素[{i}]の型: {type(item)}")
+                    self.logger.info(f"要素[{i}]の内容: {item}")
+                    
+                    result = self.process_response_item(item)
+                    if result:
+                        return result
+            
+            self.logger.warning("辞書データを抽出できませんでした")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"予期せぬエラーが発生しました: {str(e)}")
+            return None
+
+if __name__ == "__main__":
+    test = browser_use_test()
+    response = test.run(test._get_prompt())
+    if response:
+        print("取得した株価データ:", response)
+    else:
+        print("株価データの取得に失敗しました。ログを確認してください。")
+        # TODO 新規発注処理
+        # TODO 保有証券確認処理
+        # TODO 保有証券の評価
+        # TODO 保有証券の買い増し処理

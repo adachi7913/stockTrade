@@ -71,7 +71,7 @@ class ApiHandler:
                 "period": "推奨保有期間（整数）" or "NG",
                 "riskReward": "リスクリワード比（計算結果）" or "NG"
             }},
-            "no_entry_span": <再判断までの日数（整数）>
+            "no_entry_span": <再判断までの日数（整数:1 - 14）>
         }}
         """
         return prompt
