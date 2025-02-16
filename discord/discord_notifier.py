@@ -1,6 +1,6 @@
 import requests
 
-from dao.stock_dao import StockDAO
+from repository.stock_repository import StockRepository
 from util.date_util import get_current_datetime
 
 # Discord Webhook URLs

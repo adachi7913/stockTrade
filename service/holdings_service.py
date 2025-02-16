@@ -3,7 +3,7 @@ import logging
 from typing import Dict, List, Optional
 
 from browser_use.browser_use import BrowserUse
-from dao.stock_dao import StockDAO
+from repository.stock_repository import StockRepository
 from lib.table_category import TableCategory
 from Gemini.api_handler import ApiHandler
 from models.evaluation_result import EvaluationResult
@@ -12,7 +12,7 @@ class HoldingsService:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
         self.browser_use = BrowserUse()
-        self.stock_dao = StockDAO()
+        self.stock_dao = StockRepository()
 
     def get_holdings(self) -> Optional[Dict[str, str]]:
         """

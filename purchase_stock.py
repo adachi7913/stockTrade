@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import os
 from dotenv import load_dotenv
 
-from dao.entry_dao import EntryDAO
+from repository.entry_repository import EntryRepository
 from Gemini.entry_judgment_handler import EntryJudgmentHandler
 from browser_use.entry_browser_use import EntryBrowserUse
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class StockPurchaseManager:
     def __init__(self):
         load_dotenv()
-        self.entry_dao = EntryDAO()
+        self.entry_dao = EntryRepository()
         self.judgment_handler = EntryJudgmentHandler(
             api_key=os.getenv('GEMINI_API_KEY'),
             logger=logger

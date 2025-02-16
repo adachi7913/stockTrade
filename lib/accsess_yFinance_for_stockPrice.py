@@ -4,6 +4,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
+from repository.stock_repository import StockRepository
 
 
 class StockPriceAPI:
@@ -38,8 +39,7 @@ class StockPriceAPI:
             ticker_info = ticker.info
             market_cap = ticker_info.get("marketCap")
             if market_cap is not None:
-                from dao.stock_dao import StockDAO
-                stock_dao = StockDAO()
+                stock_dao = StockRepository()
                 stock_dao.update_market_cap(self.code, market_cap)
                 stock_dao.close()
 
@@ -291,6 +291,6 @@ def fetch_batch_data_yfinance(stock_codes, expairy=None):
 
 
 # if __name__ == "__main__":
-#     stock_dao = StockDAO()
+#     stock_dao = StockRepository()
 #     stock_dao.update_market_cap("1301", 1000000000)
 #     print("OK")

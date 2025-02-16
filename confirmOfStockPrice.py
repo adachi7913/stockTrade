@@ -5,6 +5,7 @@ import datetime
 import glob
 import time
 import sys
+from dotenv import load_dotenv
 from service.stock_service import run_stock_service
 
 def setup_logging(log_type):
@@ -39,10 +40,25 @@ def cleanup_old_logs(log_type):
             os.remove(file)
 
 if __name__ == "__main__":
+    # 環境変数を確実に読み込む
+    load_dotenv(override=True)
+    
     cleanup_old_logs("stockPrice")
     logger = setup_logging("stockPrice")
     logger.info("Stock Service Starting")
+    
+    # FETCH_DATA_RANGEを整数として取得
     fetch_range = os.environ.get("FETCH_DATA_RANGE")
+    if fetch_range:
+        try:
+            fetch_range = int(fetch_range)
+            logger.info(f"取得期間: {fetch_range}年")
+        except ValueError:
+            logger.error(f"FETCH_DATA_RANGEの値が不正です: {fetch_range}")
+            sys.exit(1)
+    else:
+        logger.error("FETCH_DATA_RANGEが設定されていません")
+        sys.exit(1)
     
     # コマンドライン引数から開始銘柄コードを取得
     start_code = None
@@ -50,4 +66,4 @@ if __name__ == "__main__":
         start_code = sys.argv[1]
         logger.info(f"開始銘柄コード: {start_code}")
     
-    run_stock_service(expiry=fetch_range, start_code=start_code)  # 開始銘柄コードを渡す 
+    run_stock_service(expiry=fetch_range, start_code=start_code)  # 整数に変換した値を渡す 

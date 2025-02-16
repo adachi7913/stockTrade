@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 from browser_use.browser_use import BrowserUse
-from dao.stock_dao import StockDAO
+from repository.stock_repository import StockRepository
 from lib.table_category import TableCategory
 from Gemini.api_handler import ApiHandler
 from typing import Dict, Optional
@@ -39,7 +39,7 @@ class HoldingsEvaluator:
     def __init__(self):
         self.logger = setup_logging()
         self.browser_test = BrowserUse()
-        self.stock_dao = StockDAO()
+        self.stock_dao = StockRepository()
 
     def get_holdings(self):
         """

@@ -5,7 +5,7 @@ from dotenv import load_dotenv  # .env再読み込み用
 import os
 import logging
 
-from dao.stock_dao import StockDAO
+from repository.stock_repository import StockRepository
 from Gemini.api_handler import ApiHandler
 from lib.parse_response import parse_response
 from lib.table_category import TableCategory
@@ -16,7 +16,7 @@ def run_ai_rule_generation(start_code=None):
         logging.info("Entry Rule Generation Starting")
 
         # 取得用のDAOは別途作成して銘柄コード一覧を取得
-        tmp_dao = StockDAO()
+        tmp_dao = StockRepository()
         stock_codes = tmp_dao.fetch_company_code_list()
         tmp_dao.close()
 
@@ -33,7 +33,7 @@ def run_ai_rule_generation(start_code=None):
                 # print(f"STOP_GEMINI_FLAGが設定されているため、{stock_code} の処理をスキップします。")
                 return
 
-            dao = StockDAO()
+            dao = StockRepository()
             try:
                 company_info = dao.fetch_company_info(stock_code)
                 if not company_info:

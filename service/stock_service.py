@@ -3,7 +3,7 @@ import concurrent.futures
 import threading
 from datetime import date, timedelta
 from dotenv import load_dotenv
-from dao.stock_dao import StockDAO
+from repository.stock_repository import StockRepository
 from lib.accsess_yFinance_for_stockPrice import StockPriceAPI, fetch_batch_data_yfinance
 from lib.indicator_calculator import IndicatorCalculator
 from lib.table_category import TableCategory
@@ -49,7 +49,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
         return
 
     try:
-        dao = StockDAO()
+        dao = StockRepository()
         start_time = time.time()
 
         # 企業情報の一括取得
@@ -208,7 +208,7 @@ def run_stock_service(expiry=None, start_code=None):
     load_dotenv(override=True)
     init_db_pool()
     
-    dao = StockDAO()
+    dao = StockRepository()
     stock_codes = dao.fetch_company_code_list()
     dao.close()
     
@@ -247,12 +247,21 @@ def run_stock_service(expiry=None, start_code=None):
             logging.info("日次更新モード（株価のみ）: 5日分のデータを取得します")
     else:
         # confirmOfStockPrice用の設定（FETCH_DATA_RANGE年分）
-        years = int(expiry)
-        business_days = years * 252
-        extra_days = 90
-        fetch_range = (years * 365) + extra_days
-        expected_days = business_days + 52
-        logging.info(f"全期間取得モード: {years}年分のデータを取得します")
+        if not expiry:
+            logging.error("取得期間が指定されていません")
+            return
+            
+        years = int(expiry)  # 確実に整数として扱う
+        if years <= 0:
+            logging.error(f"不正な取得期間です: {years}年")
+            return
+            
+        logging.info(f"取得期間: {years}年")
+        business_days = years * 252  # 営業日数
+        extra_days = 90  # 余裕を持たせる日数
+        fetch_range = (years * 365) + extra_days  # 実際の取得日数
+        expected_days = business_days + 52  # 予想される最大データ数
+        logging.info(f"全期間取得モード: {years}年分のデータを取得します（営業日数: {business_days}日, 取得日数: {fetch_range}日）")
 
     # システムリソースに基づいて最適なワーカー数とバッチサイズを決定
     cpu_count = os.cpu_count() or 4
