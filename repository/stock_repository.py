@@ -4,6 +4,7 @@ import threading
 from datetime import date, datetime
 from typing import List, Dict, Optional
 from .base_repository import BaseRepository
+import numpy as np
 
 # DDLの実行を排他制御するためのグローバルロック
 DDL_LOCK = threading.Lock()
@@ -257,23 +258,94 @@ class StockRepository(BaseRepository):
         """
         table_name = f"{industry_name}_indicator"
         try:
+            # 安全に丸めるヘルパー関数
+            def safe_round(value, ndigits=2):
+                try:
+                    if isinstance(value, (int, float)) and not np.isnan(value):
+                        return round(value, ndigits)
+                    return 0
+                except Exception:
+                    return 0
+
             upsert_query = f"""
             INSERT INTO {table_name} (
-                code, date, macd, signal, rsi, stoch, bb, atr
+                code, date, ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a, ichimoku_senkou_b,
+                adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr, rsi, macd,
+                dynamic_threshold, weekly_trend, pca_signal
             ) VALUES (
-                %(code)s, %(date)s, %(macd)s, %(signal)s, 
-                %(rsi)s, %(stoch)s, %(bb)s, %(atr)s
+                %(code)s, %(date)s, %(ichimoku_tenkan)s, %(ichimoku_kijun)s, 
+                %(ichimoku_senkou_a)s, %(ichimoku_senkou_b)s, %(adx)s,
+                %(bb_lower)s, %(bb_middle)s, %(bb_upper)s,
+                %(stoch_k)s, %(stoch_d)s, %(atr)s, %(rsi)s, %(macd)s,
+                %(dynamic_threshold)s, %(weekly_trend)s, %(pca_signal)s
             )
             ON CONFLICT (code, date) DO UPDATE SET
-                macd = EXCLUDED.macd,
-                signal = EXCLUDED.signal,
+                ichimoku_tenkan = EXCLUDED.ichimoku_tenkan,
+                ichimoku_kijun = EXCLUDED.ichimoku_kijun,
+                ichimoku_senkou_a = EXCLUDED.ichimoku_senkou_a,
+                ichimoku_senkou_b = EXCLUDED.ichimoku_senkou_b,
+                adx = EXCLUDED.adx,
+                bb_lower = EXCLUDED.bb_lower,
+                bb_middle = EXCLUDED.bb_middle,
+                bb_upper = EXCLUDED.bb_upper,
+                stoch_k = EXCLUDED.stoch_k,
+                stoch_d = EXCLUDED.stoch_d,
+                atr = EXCLUDED.atr,
                 rsi = EXCLUDED.rsi,
-                stoch = EXCLUDED.stoch,
-                bb = EXCLUDED.bb,
-                atr = EXCLUDED.atr;
+                macd = EXCLUDED.macd,
+                dynamic_threshold = EXCLUDED.dynamic_threshold,
+                weekly_trend = EXCLUDED.weekly_trend,
+                pca_signal = EXCLUDED.pca_signal;
             """
+
+            # リスト形式のデータを辞書形式に変換
+            if isinstance(indicator_data, list):
+                for data in indicator_data:
+                    params = {
+                        'code': code,
+                        'date': data[0] if isinstance(data, (list, tuple)) else data.get('date'),
+                        'ichimoku_tenkan': safe_round(data.get('ichimoku_tenkan', 0)),
+                        'ichimoku_kijun': safe_round(data.get('ichimoku_kijun', 0)),
+                        'ichimoku_senkou_a': safe_round(data.get('ichimoku_senkou_a', 0)),
+                        'ichimoku_senkou_b': safe_round(data.get('ichimoku_senkou_b', 0)),
+                        'adx': safe_round(data.get('adx', 0)),
+                        'bb_lower': safe_round(data.get('bb_lower', 0)),
+                        'bb_middle': safe_round(data.get('bb_middle', 0)),
+                        'bb_upper': safe_round(data.get('bb_upper', 0)),
+                        'stoch_k': safe_round(data.get('stoch_k', 0)),
+                        'stoch_d': safe_round(data.get('stoch_d', 0)),
+                        'atr': safe_round(data.get('atr', 0)),
+                        'rsi': safe_round(data.get('rsi', 0)),
+                        'macd': safe_round(data.get('macd', 0)),
+                        'dynamic_threshold': data.get('dynamic_threshold', None),
+                        'weekly_trend': data.get('weekly_trend', None),
+                        'pca_signal': data.get('pca_signal', None)
+                    }
+                    self.cur.execute(upsert_query, params)
+            else:
+                # 単一のデータの場合
+                params = {
+                    'code': code,
+                    'date': indicator_data.get('date'),
+                    'ichimoku_tenkan': safe_round(indicator_data.get('ichimoku_tenkan', 0)),
+                    'ichimoku_kijun': safe_round(indicator_data.get('ichimoku_kijun', 0)),
+                    'ichimoku_senkou_a': safe_round(indicator_data.get('ichimoku_senkou_a', 0)),
+                    'ichimoku_senkou_b': safe_round(indicator_data.get('ichimoku_senkou_b', 0)),
+                    'adx': safe_round(indicator_data.get('adx', 0)),
+                    'bb_lower': safe_round(indicator_data.get('bb_lower', 0)),
+                    'bb_middle': safe_round(indicator_data.get('bb_middle', 0)),
+                    'bb_upper': safe_round(indicator_data.get('bb_upper', 0)),
+                    'stoch_k': safe_round(indicator_data.get('stoch_k', 0)),
+                    'stoch_d': safe_round(indicator_data.get('stoch_d', 0)),
+                    'atr': safe_round(indicator_data.get('atr', 0)),
+                    'rsi': safe_round(indicator_data.get('rsi', 0)),
+                    'macd': safe_round(indicator_data.get('macd', 0)),
+                    'dynamic_threshold': indicator_data.get('dynamic_threshold', None),
+                    'weekly_trend': indicator_data.get('weekly_trend', None),
+                    'pca_signal': indicator_data.get('pca_signal', None)
+                }
+                self.cur.execute(upsert_query, params)
             
-            self.cur.execute(upsert_query, indicator_data)
             self.conn.commit()
             return True
             
