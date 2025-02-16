@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class StockPurchaseManager:
     def __init__(self):
         load_dotenv()
-        self.entry_dao = EntryRepository()
+        self.entry_repository = EntryRepository()
         self.judgment_handler = EntryJudgmentHandler(
             api_key=os.getenv('GEMINI_API_KEY'),
             logger=logger
@@ -39,7 +39,7 @@ class StockPurchaseManager:
         Returns:
             Optional[Dict]: エントリー候補情報
         """
-        candidates = self.entry_dao.fetch_best_entry_candidates()
+        candidates = self.entry_repository.fetch_best_entry_candidates()
         if not candidates:
             logger.info("エントリー候補が見つかりませんでした")
             return None
@@ -90,7 +90,7 @@ class StockPurchaseManager:
             
             if success:
                 # エントリー情報を保存
-                self.entry_dao.save_entry_info(candidate)
+                self.entry_repository.save_entry_info(candidate)
                 logger.info(f"エントリー成功: {candidate['code']}")
                 return True
             else:

@@ -39,9 +39,9 @@ class StockPriceAPI:
             ticker_info = ticker.info
             market_cap = ticker_info.get("marketCap")
             if market_cap is not None:
-                stock_dao = StockRepository()
-                stock_dao.update_market_cap(self.code, market_cap)
-                stock_dao.close()
+                stock_repository = StockRepository()
+                stock_repository.update_market_cap(self.code, market_cap)
+                stock_repository.close()
 
             if self.expairy is not None:
                 # confirmOfStockPrice用：指定された日数分のデータを取得
@@ -291,6 +291,6 @@ def fetch_batch_data_yfinance(stock_codes, expairy=None):
 
 
 # if __name__ == "__main__":
-#     stock_dao = StockRepository()
-#     stock_dao.update_market_cap("1301", 1000000000)
+#     stock_repository = StockRepository()
+#     stock_repository.update_market_cap("1301", 1000000000)
 #     print("OK")

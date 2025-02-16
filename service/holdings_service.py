@@ -12,7 +12,7 @@ class HoldingsService:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
         self.browser_use = BrowserUse()
-        self.stock_dao = StockRepository()
+        self.stock_repository = StockRepository()
 
     def get_holdings(self) -> Optional[Dict[str, str]]:
         """
@@ -47,7 +47,7 @@ class HoldingsService:
         """
         try:
             # 企業情報を取得
-            company_info = self.stock_dao.fetch_company_info(code + "0")
+            company_info = self.stock_repository.fetch_company_info(code + "0")
             if not company_info:
                 self.logger.error(f"企業情報が見つかりません: {code}")
                 return None
@@ -56,7 +56,7 @@ class HoldingsService:
             industry_name = TableCategory.get_table_prefix(company_info[10])
             
             # 過去の価格とインジケーターを取得
-            stock_data = self.stock_dao.get_stock_full_data_period(code, industry_name)
+            stock_data = self.stock_repository.get_stock_full_data_period(code, industry_name)
             if not stock_data:
                 self.logger.error(f"株価データが見つかりません: {code}")
                 return None

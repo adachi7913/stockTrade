@@ -49,11 +49,11 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
         return
 
     try:
-        dao = StockRepository()
+        repository = StockRepository()
         start_time = time.time()
 
         # 企業情報の一括取得
-        company_infos = {code: dao.fetch_company_info(code) for code in stock_codes}
+        company_infos = {code: repository.fetch_company_info(code) for code in stock_codes}
         valid_codes = [code for code, info in company_infos.items() if info]
         
         if not valid_codes:
@@ -61,8 +61,14 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
             return
 
         # 業種名のマッピングを作成
-        industry_names = {code: TableCategory.get_table_prefix(company_infos[code][3]) 
-                         for code in valid_codes}
+        industry_names = {}
+        for code in valid_codes:
+            try:
+                industry_name = company_infos[code][5]  # industry_nameのインデックス
+                industry_names[code] = TableCategory.get_table_prefix(industry_name)
+            except (IndexError, ValueError) as e:
+                logging.error(f"業種名の取得に失敗: {code}, {e}")
+                continue
 
         # 環境変数による処理モードの判定
         pricing_flag = os.environ.get("PRICING_PROCESS_DONE", "n").lower() == "y"
@@ -146,7 +152,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
 
         # インジケーター計算用のデータ取得（pricing_flagがFalseの場合）
         if not pricing_flag and indicator_flag:
-            price_data_batch = {code: dao.get_stock_full_data_period(code, industry_names[code]) 
+            price_data_batch = {code: repository.get_stock_full_data_period(code, industry_names[code]) 
                               for code in valid_codes}
         
         if not pricing_flag and not indicator_flag:
@@ -171,7 +177,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
                 if indicator_flag:
                     indicator_calculator = IndicatorCalculator(price_data)
                     indicator = indicator_calculator.get_indicators()
-                    dao.insert_indicator_data(indicator, code, industry_name)
+                    repository.insert_indicator_data(indicator, code, industry_name)
                     logging.info(f"銘柄 {code} のインジケーター計算・保存完了")
 
                 # 株価データの挿入
@@ -181,7 +187,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
                         if shutdown_event.is_set():
                             break
                         if validate_price_data(price):
-                            result = dao.insert_stock_price_data(price, industry_name)
+                            result = repository.insert_stock_price_data(price, industry_name)
                             if result:
                                 success_count += 1
                             else:
@@ -200,7 +206,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
         logging.error(f"バッチ {stock_codes} の処理中エラー: {e}")
     finally:
         try:
-            dao.close()
+            repository.close()
         except Exception:
             pass
 
@@ -208,9 +214,9 @@ def run_stock_service(expiry=None, start_code=None):
     load_dotenv(override=True)
     init_db_pool()
     
-    dao = StockRepository()
-    stock_codes = dao.fetch_company_code_list()
-    dao.close()
+    repository = StockRepository()
+    stock_codes = repository.fetch_company_code_list()
+    repository.close()
     
     if not stock_codes:
         logging.error("銘柄コードの取得に失敗しました。")
