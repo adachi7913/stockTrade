@@ -156,7 +156,7 @@ class StockRepository(BaseRepository):
         try:
             query = f"""
             WITH price_data AS (
-                SELECT p.*, i.macd, i.signal, i.rsi, i.stoch, i.bb, i.atr
+                SELECT p.*, i.macd, i.stoch_k, i.stoch_d, i.rsi, i.bb_lower, i.bb_middle, i.bb_upper, i.atr
                 FROM {industry_name}_price p
                 LEFT JOIN {industry_name}_indicator i ON p.code = i.code AND p.date = i.date
                 WHERE p.code = %s
@@ -179,11 +179,13 @@ class StockRepository(BaseRepository):
                     'close': float(row[5]),
                     'volume': int(row[6]),
                     'macd': row[7],
-                    'signal': row[8],
-                    'rsi': row[9],
-                    'stoch': row[10],
-                    'bb': row[11],
-                    'atr': row[12]
+                    'stoch_k': row[8],
+                    'stoch_d': row[9],
+                    'rsi': row[10],
+                    'bb_lower': row[11],
+                    'bb_middle': row[12],
+                    'bb_upper': row[13],
+                    'atr': row[14]
                 }
                 result.append(data)
             
