@@ -6,6 +6,7 @@ import time
 from typing import Dict, List, Optional
 import os
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
 # TODO: エントリー判断の機能強化
 # - 市場環境の考慮（VIX、セクター動向など）
@@ -18,7 +19,16 @@ class EntryJudgmentHandler:
     def __init__(self, api_key: str, logger: logging.Logger):
         self.logger = logger
         self.api_key = api_key
-        self.model = os.environ.get("GEMINI_MODEL")
+
+    def _get_model_name(self) -> str:
+        """
+        実行時に.envファイルを読み込んでモデル名を取得
+        
+        Returns:
+            str: Geminiモデル名
+        """
+        load_dotenv(override=True)  # 既存の環境変数を上書き
+        return os.environ.get("GEMINI_PRO_MODEL")
 
     # TODO: プロンプトの最適化
     # - より詳細な市場分析の要求
@@ -53,6 +63,7 @@ class EntryJudgmentHandler:
         - 想定損切り価格: {stock_data['stop_loss']}
         - 期待リターン: {stock_data['expected_return']}
         - エントリースコア: {stock_data.get('entry_score', 'N/A')}
+        - エントリー理由: {stock_data['reason']}
 
         【直近の価格推移】
         {price_trend}
@@ -97,7 +108,18 @@ class EntryJudgmentHandler:
         """
         try:
             prompt = self._create_prompt(stock_data, historical_data)
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+            model_name = self._get_model_name()  # 実行時にモデル名を取得
+            
+            if not model_name:
+                self.logger.error("Geminiモデル名が設定されていません")
+                return {
+                    "should_enter": False,
+                    "confidence": 0,
+                    "reasoning": "Geminiモデル名が設定されていません",
+                    "concerns": None
+                }
+                
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.api_key}"
             
             payload = {
                 "contents": [
