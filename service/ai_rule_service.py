@@ -95,7 +95,7 @@ def run_ai_rule_generation(start_code=None):
                 repository.insert_api_response(insert_data)
             except Exception as e:
                 error_msg = traceback.format_exc()
-                logging.error(f"銘柄 {stock_code} 処理中エラー: {e}")
+                logging.error(f"銘柄 {stock_code} の処理中エラー:\n{error_msg}")
                 create_error_message(error_msg)
             finally:
                 try:

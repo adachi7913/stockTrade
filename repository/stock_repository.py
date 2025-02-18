@@ -184,7 +184,8 @@ class StockRepository(BaseRepository):
             result = []
             for row in rows:
                 data = {
-                    'date': row[1],
+                    'code': str(row[0]) if not isinstance(row[0], str) else row[0],
+                    'date': row[1].strftime('%Y%m%d') if isinstance(row[1], (datetime, date)) else row[1],
                     'open': float(row[2]),
                     'high': float(row[3]),
                     'low': float(row[4]),
@@ -274,25 +275,24 @@ class StockRepository(BaseRepository):
         """
         table_name = f"{industry_name}_indicator"
         try:
-            # 変更：インジケーター計算に必要なデータが不足している場合は、INSERTをスキップしログ出力する
-            if (indicator_data.get('ichimoku_tenkan') is None or
-                indicator_data.get('ichimoku_kijun') is None or
-                indicator_data.get('ichimoku_senkou_a') is None or
-                indicator_data.get('ichimoku_senkou_b') is None or
-                indicator_data.get('adx') is None or
-                indicator_data.get('bb_lower') is None or
-                indicator_data.get('bb_middle') is None or
-                indicator_data.get('bb_upper') is None or
-                indicator_data.get('stoch_k') is None or
-                indicator_data.get('stoch_d') is None or
-                indicator_data.get('atr') is None or
-                indicator_data.get('rsi') is None or
-                indicator_data.get('macd') is None or
-                indicator_data.get('dynamic_threshold') is None or
-                indicator_data.get('pca_signal') is None or
-                indicator_data.get('weekly_trend') is None):
-                logging.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {indicator_data}")
-                return False
+            required_keys = ['ichimoku_tenkan', 'ichimoku_kijun', 'ichimoku_senkou_a', 'ichimoku_senkou_b',
+                             'adx', 'bb_lower', 'bb_middle', 'bb_upper', 'stoch_k', 'stoch_d',
+                             'atr', 'rsi', 'macd', 'dynamic_threshold', 'weekly_trend', 'pca_signal']
+            # 入力がリストの場合は各要素に対してチェックし、必要なデータが揃っているものだけ残す
+            if isinstance(indicator_data, list):
+                filtered_data = []
+                for data in indicator_data:
+                    if any(data.get(key) is None for key in required_keys):
+                        logging.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {data}")
+                        continue
+                    filtered_data.append(data)
+                indicator_data = filtered_data
+                if not indicator_data:
+                    return False
+            else:
+                if any(indicator_data.get(key) is None for key in required_keys):
+                    logging.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {indicator_data}")
+                    return False
 
             # 安全に丸めるヘルパー関数
             def safe_round(value, ndigits=2):
@@ -403,14 +403,25 @@ class StockRepository(BaseRepository):
         try:
             query = """
             INSERT INTO api_response (
-                code, date, close, rule_entry_price, rule_stop_limit,
-                rule_top_price, rule_period, risk_reward, entry_score,
-                expected_return, reason
+                date, code, close, rule_entry_price, rule_stop_limit,
+                rule_top_price, rule_period, risk_reward, no_entry_span, update_when, entry_score, expected_return, reason
             ) VALUES (
-                %(code)s, %(date)s, %(close)s, %(entry_price)s, %(stop_loss)s,
-                %(target_price)s, %(period)s, %(risk_reward)s, %(entry_score)s,
-                %(expected_return)s, %(reason)s
-            );
+                %(date)s, %(code)s, %(close)s, %(rule_entry_price)s, %(rule_stop_limit)s,
+                %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(no_entry_span)s, NOW(), %(entry_score)s, %(expected_return)s, %(reason)s
+            )
+            ON CONFLICT (code) DO UPDATE SET
+                date = EXCLUDED.date,
+                close = EXCLUDED.close,
+                rule_entry_price = EXCLUDED.rule_entry_price,
+                rule_stop_limit = EXCLUDED.rule_stop_limit,
+                rule_top_price = EXCLUDED.rule_top_price,
+                rule_period = EXCLUDED.rule_period,
+                risk_reward = EXCLUDED.risk_reward,
+                no_entry_span = EXCLUDED.no_entry_span,
+                update_when = NOW(),
+                entry_score = EXCLUDED.entry_score,
+                expected_return = EXCLUDED.expected_return,
+                reason = EXCLUDED.reason;
             """
             
             self.cur.execute(query, response_data)

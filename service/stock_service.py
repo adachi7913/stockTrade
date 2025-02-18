@@ -43,7 +43,7 @@ def get_optimal_batch_size(total_stocks: int) -> int:
     """最適なバッチサイズを計算"""
     return min(max(1, total_stocks // 200), 3)  # 最小1、最大3（さらに負荷を大幅に減らす）
 
-def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days: int):
+def process_stock_batch(five_digit_codes: List[str], four_digit_codes: List[str], fetch_range: int, expected_days: int):
     """バッチ処理による株価データの取得と更新"""
     load_dotenv(override=True)
     if os.getenv("STOP_PRICING_FLAG", "false").lower() == "y":
@@ -53,12 +53,14 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
         repository = StockRepository()
         start_time = time.time()
 
-        # 企業情報の一括取得
-        company_infos = {code: repository.fetch_industry_name_prefix(code) for code in stock_codes}
+        # 作業用の対応マッピング 5桁 -> 4桁
+        code_mapping = dict(zip(five_digit_codes, four_digit_codes))
+        # 5桁コードを用いて企業情報を取得
+        company_infos = {code: repository.fetch_industry_name_prefix(code) for code in five_digit_codes}
         valid_codes = [code for code, info in company_infos.items() if info]
         
         if not valid_codes:
-            logging.error(f"企業情報取得失敗: {stock_codes}")
+            logging.error(f"企業情報取得失敗: {five_digit_codes}")
             return
 
         # 業種名のマッピングを作成
@@ -105,8 +107,8 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
                 success = False
                 skip_retries = False
                 
-                # 銘柄コードのバリデーション
-                validated_code = validate_stock_code(code)
+                # 銘柄コードのバリデーション（4桁コードを使用）
+                validated_code = validate_stock_code(code_mapping[code])
                 
                 for retry in range(max_retries):
                     try:
@@ -118,9 +120,9 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
                             # 各データポイントを検証
                             validated_data = [data for data in single_data if validate_price_data(data)]
                             if validated_data:
-                                price_data_batch[code] = validated_data
+                                price_data_batch[code_mapping[code]] = validated_data
                                 success = True
-                                logging.info(f"銘柄 {code} のデータ取得成功（取得件数: {len(validated_data)}件, 予想最大件数: {expected_days}件）")
+                                logging.info(f"銘柄 {code}（4桁コード: {code_mapping[code]}） のデータ取得成功（取得件数: {len(validated_data)}件, 予想最大件数: {expected_days}件）")
                                 if len(validated_data) > expected_days:
                                     logging.warning(f"銘柄 {code} の取得データ件数が予想を超えています")
                                 break
@@ -149,7 +151,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
 
         # インジケーター計算用のデータ取得（pricing_flagがFalseの場合）
         if not pricing_flag and indicator_flag:
-            price_data_batch = {code: repository.get_stock_full_data_period(code, industry_names[code]) 
+            price_data_batch = {code_mapping[code]: repository.get_stock_full_data_period(code, industry_names[code]) 
                               for code in valid_codes}
         
         if not pricing_flag and not indicator_flag:
@@ -158,13 +160,17 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
 
         # 各銘柄の処理
         for code in valid_codes:
+            # 5桁コード: code, 対応する4桁コード:
+            code_four = code_mapping[code]
+
             if shutdown_event.is_set():
-                logging.warning(f"{code} の処理が中断されました。")
+                logging.warning(f"{code_four} の処理が中断されました。")
                 break
 
-            price_data = price_data_batch.get(code)
+            # 後続処理では4桁コードを使用
+            price_data = price_data_batch.get(code_four)
             if not price_data:
-                logging.error(f"株価データの取得に失敗しました: {code}")
+                logging.error(f"株価データの取得に失敗しました: {code_four}")
                 continue
 
             industry_name = industry_names[code]
@@ -174,8 +180,8 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
                 if indicator_flag:
                     indicator_calculator = IndicatorCalculator(price_data)
                     indicator = indicator_calculator.get_indicators()
-                    repository.insert_indicator_data(indicator, code, industry_name)
-                    logging.info(f"銘柄 {code} のインジケーター計算・保存完了")
+                    repository.insert_indicator_data(indicator, code_four, industry_name)
+                    logging.info(f"銘柄 {code_four} のインジケーター計算・保存完了")
 
                 # 株価データの挿入
                 if pricing_flag and price_data:
@@ -188,19 +194,22 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
                             if result:
                                 success_count += 1
                             else:
-                                logging.error(f"株価データ 挿入失敗: {code}, {price}")
+                                logging.error(f"株価データ 挿入失敗: {code_four}, {price}")
                     
-                    logging.info(f"銘柄 {code} の株価データ {success_count}/{len(price_data)} 件を挿入完了")
+                    logging.info(f"銘柄 {code_four} の株価データ {success_count}/{len(price_data)} 件を挿入完了")
 
             except Exception as e:
-                logging.error(f"銘柄 {code} の処理中エラー: {e}")
+                logging.error(f"銘柄 {code_four} の処理中エラー: {e}")
                 continue
+            
+            # 各銘柄処理後に1秒のディレイを追加
+            time.sleep(1)
 
         elapsed = time.time() - start_time
-        logging.info(f"バッチ {stock_codes} の処理時間: {elapsed:.2f} 秒")
+        logging.info(f"バッチ {five_digit_codes} の処理時間: {elapsed:.2f} 秒")
 
     except Exception as e:
-        logging.error(f"バッチ {stock_codes} の処理中エラー: {e}")
+        logging.error(f"バッチ {five_digit_codes} の処理中エラー: {e}")
     finally:
         try:
             repository.close()
@@ -212,26 +221,28 @@ def run_stock_service(expiry=None, start_code=None):
     init_db_pool()
     
     repository = StockRepository()
-    stock_codes = repository.fetch_company_code_list()
+    original_code_list = repository.fetch_company_code_list()
     repository.close()
-    # 5桁かつ末尾が'0'の場合は末尾の'0'を削除して、4桁のコードに変換する
-    stock_codes = [code[:-1] if len(code) == 5 and code.endswith('0') else code for code in stock_codes]
-    if not stock_codes:
+    if not original_code_list:
         logging.error("銘柄コードの取得に失敗しました。")
         return
+    # 5桁コードリスト（末尾0削除前）と、4桁コードリスト（末尾0削除後）をそれぞれ用意する
+    five_digit_codes = original_code_list
+    four_digit_codes = [code[:-1] if len(code) == 5 and code.endswith('0') else code for code in original_code_list]
 
-    # 開始銘柄コードが指定されている場合、そこから処理を開始
+    # 開始銘柄コードが指定されている場合、4桁リストと5桁リストの両方を同期して更新
     if start_code:
         if len(start_code) == 5 and start_code.endswith('0'):
             start_code = start_code[:-1]
         try:
-            start_index = stock_codes.index(start_code)
-            stock_codes = stock_codes[start_index:]
-            logging.info(f"銘柄コード {start_code} から処理を開始します。残り {len(stock_codes)} 銘柄")
+            start_index = four_digit_codes.index(start_code)
+            four_digit_codes = four_digit_codes[start_index:]
+            five_digit_codes = five_digit_codes[start_index:]
+            logging.info(f"銘柄コード {start_code} から処理を開始します。残り {len(four_digit_codes)} 銘柄")
         except ValueError:
             logging.warning(f"指定された銘柄コード {start_code} が見つかりません。最初から処理を開始します。")
 
-    logging.info(f"処理対象の銘柄コード: {stock_codes}")
+    logging.info(f"処理対象の銘柄コード（4桁）: {four_digit_codes}")
 
     # 取得期間の設定
     if expiry is None:
@@ -272,14 +283,15 @@ def run_stock_service(expiry=None, start_code=None):
     # システムリソースに基づいて最適なワーカー数とバッチサイズを決定
     cpu_count = os.cpu_count() or 4
     max_workers = min(max(2, cpu_count // 2), 4)
-    batch_size = get_optimal_batch_size(len(stock_codes))
+    batch_size = get_optimal_batch_size(len(four_digit_codes))
     
-    # バッチに分割して処理
-    batches = [stock_codes[i:i + batch_size] for i in range(0, len(stock_codes), batch_size)]
-    
+    # それぞれのリストをバッチに分割
+    batches_four = [four_digit_codes[i:i + batch_size] for i in range(0, len(four_digit_codes), batch_size)]
+    batches_five = [five_digit_codes[i:i + batch_size] for i in range(0, len(five_digit_codes), batch_size)]
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(process_stock_batch, batch, fetch_range, expected_days) 
-                  for batch in batches]
+        futures = [executor.submit(process_stock_batch, batches_five[i], batches_four[i], fetch_range, expected_days) 
+                  for i in range(len(batches_four))]
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()

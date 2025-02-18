@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from decimal import Decimal  # まだインポートしていない場合は追加
 
 # TODO: エントリー判断の機能強化
 # - 市場環境の考慮（VIX、セクター動向など）
@@ -42,17 +43,19 @@ class EntryJudgmentHandler:
         
         Args:
             stock_data (Dict): 銘柄情報
-            historical_data (List[Dict]): 過去の価格データ
+            historical_data (List[Dict]): 過去の価格データ（数年分）
             
         Returns:
             str: プロンプト文字列
         """
-        # 直近の価格トレンドを文字列化
-        price_trend = "\n".join([
-            f"- {data['date']}: 始値{data['open']}, 高値{data['high']}, "
-            f"安値{data['low']}, 終値{data['close']}, 出来高{data['volume']}"
-            for data in historical_data[-5:]  # 直近5日分
-        ])
+        # 取得した全過去データを整形済みのJSON文字列に変換する
+        # Decimal型の値は float に変換して処理する
+        full_history = json.dumps(
+            historical_data,
+            ensure_ascii=False,
+            indent=2,
+            default=lambda o: float(o) if isinstance(o, Decimal) else str(o)
+        )
 
         prompt = f"""
         以下の銘柄について、現時点でのエントリー（買い）判断を行ってください。
@@ -65,21 +68,18 @@ class EntryJudgmentHandler:
         - エントリースコア: {stock_data.get('entry_score', 'N/A')}
         - エントリー理由: {stock_data['reason']}
 
-        【直近の価格推移】
-        {price_trend}
+        【過去データ】
+        {full_history}
 
         【判断基準】
-        1. 直近の価格トレンド
-        2. ボリューム（出来高）の推移
-        3. 想定リスク/リワード比
-        4. その他の市場要因
+        取得された過去数年分の株価と指標データをもとに、長期的な傾向やパターンを評価してください。
 
         【回答形式】
         以下のJSON形式で回答してください：
         {{
-            "should_enter": true/false,  # エントリー推奨ならtrue
-            "confidence": 0-100,         # 判断の確信度
-            "reasoning": "判断理由",      # 判断の根拠
+            "should_enter": true or false,
+            "confidence": 0-100,
+            "reasoning": "判断根拠",
             "concerns": "懸念事項"        # ある場合のみ
         }}
         """
@@ -95,7 +95,7 @@ class EntryJudgmentHandler:
             return match.group(1)
         return content
 
-    async def judge_entry(self, stock_data: Dict, historical_data: List[Dict]) -> Dict:
+    def judge_entry(self, stock_data: Dict, historical_data: List[Dict]) -> Dict:
         """
         エントリー判断を実行
         

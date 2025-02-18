@@ -1,3 +1,4 @@
+import os
 from typing import List, Dict, Optional
 from datetime import datetime
 from .base_repository import BaseRepository
@@ -14,6 +15,15 @@ class EntryRepository(BaseRepository):
             List[Dict]: エントリー候補のリスト
         """
         try:
+            # 環境変数 MIN_ENTRY_SCORE が設定されている場合、その値を使用（int変換）
+            env_min_score = os.getenv("MIN_ENTRY_SCORE")
+            if env_min_score is not None:
+                try:
+                    min_score = int(env_min_score)
+                except ValueError:
+                    self.logger.error(f"環境変数MIN_ENTRY_SCOREの値が数値に変換できません: {env_min_score}. デフォルト値650を使用します。")
+                    min_score = 650
+
             query = """
             SELECT 
                 code, date, close, rule_entry_price, rule_stop_limit,
