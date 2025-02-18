@@ -84,7 +84,7 @@ class IndicatorCalculator:
         """全てのインジケーターを計算"""
         try:
             # 十分なデータがあるか確認
-            min_required_records = 52  # 最低限必要なレコード数
+            min_required_records = 78  # 最低限必要なレコード数
             if len(self.df) < min_required_records:
                 logging.warning(f"データ不足: {len(self.df)}レコード（必要数: {min_required_records}）")
                 latest_row = self.df.iloc[-1]
@@ -196,7 +196,7 @@ class IndicatorCalculator:
         """全てのインジケーターを計算"""
         try:
             # 十分なデータがあるか確認
-            min_required_records = 52  # 最低限必要なレコード数
+            min_required_records = 78  # 最低限必要なレコード数
             if len(self.df) < min_required_records:
                 logging.warning(f"データ不足: {len(self.df)}レコード（必要数: {min_required_records}）")
                 latest_row = self.df.iloc[-1]

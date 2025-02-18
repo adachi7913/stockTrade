@@ -3,8 +3,11 @@ import os
 import threading
 from datetime import date, datetime
 from typing import List, Dict, Optional
+
+from lib.table_category import TableCategory
 from .base_repository import BaseRepository
 import numpy as np
+import logging
 
 # DDLの実行を排他制御するためのグローバルロック
 DDL_LOCK = threading.Lock()
@@ -147,27 +150,36 @@ class StockRepository(BaseRepository):
         指定された証券コードの株価データと指標データを取得します
         
         Args:
-            code (str): 証券コード
+            code (str): 証券コード（4桁）
             industry_name (str): 業種名
             
         Returns:
             List[Dict]: 株価データと指標データのリスト
         """
         try:
-            query = f"""
+            # 環境変数から取得日数を取得
+            fetch_range = os.getenv("FETCH_DATA_RANGE", "1")  # 範囲は年数。デフォルトは1年
+            
+            query = """
             WITH price_data AS (
                 SELECT p.*, i.macd, i.stoch_k, i.stoch_d, i.rsi, i.bb_lower, i.bb_middle, i.bb_upper, i.atr
-                FROM {industry_name}_price p
-                LEFT JOIN {industry_name}_indicator i ON p.code = i.code AND p.date = i.date
+                FROM {}_price p
+                LEFT JOIN {}_indicator i ON p.code = i.code AND p.date = i.date
                 WHERE p.code = %s
+                AND p.date BETWEEN (CURRENT_DATE - (%s || ' years')::interval) AND CURRENT_DATE
                 ORDER BY p.date DESC
-                LIMIT 100
             )
             SELECT * FROM price_data ORDER BY date ASC;
-            """
+            """.format(industry_name, industry_name)
             
-            self.cur.execute(query, (code,))
+            
+            self.cur.execute(query, (code, fetch_range))
             rows = self.cur.fetchall()
+            
+            if not rows:
+                self.logger.error(f"データが取得できませんでした: code={code}, industry_name={industry_name}")
+                return []
+                
             
             result = []
             for row in rows:
@@ -224,24 +236,26 @@ class StockRepository(BaseRepository):
 
     def fetch_no_entry_info(self, code: str) -> Optional[tuple]:
         """
-        指定された証券コードのエントリー不可情報を取得します
-        
+        指定された銘柄コードに対して、api_responseテーブルから最新のAPI応答の date と rule_period を
+        no_entry_span として取得して返します。
+
         Args:
-            code (str): 証券コード
-            
+            code (str): 銘柄コード
+
         Returns:
-            Optional[tuple]: (最終エントリー日, エントリー不可期間)のタプル、取得失敗時はNone
+            Optional[tuple]: (最新のAPI応答の日付, no_entry_span) のタプル、取得失敗時は None
         """
         try:
             query = """
-            SELECT last_entry_date, no_entry_span
-            FROM no_entry_info
-            WHERE code = %s;
+            SELECT date, no_entry_span
+            FROM api_response
+            WHERE code = %s
+            ORDER BY date DESC
+            LIMIT 1;
             """
             self.cur.execute(query, (code,))
             result = self.cur.fetchone()
             return result if result else None
-            
         except Exception as e:
             self.logger.error(f"エントリー不可情報取得エラー: {e}")
             return None
@@ -260,6 +274,26 @@ class StockRepository(BaseRepository):
         """
         table_name = f"{industry_name}_indicator"
         try:
+            # 追加：インジケーター計算に必要なデータが不足している場合は、INSERTをスキップしログ出力する
+            if (indicator_data.get('ichimoku_tenkan', None) == 0 or
+                indicator_data.get('ichimoku_kijun', None) == 0 or
+                indicator_data.get('ichimoku_senkou_a', None) == 0 or
+                indicator_data.get('ichimoku_senkou_b', None) == 0 or
+                indicator_data.get('adx', None) == 0 or
+                indicator_data.get('bb_lower', None) == 0 or
+                indicator_data.get('bb_middle', None) == 0 or
+                indicator_data.get('bb_upper', None) == 0 or
+                indicator_data.get('stoch_k', None) == 0 or
+                indicator_data.get('stoch_d', None) == 0 or
+                indicator_data.get('atr', None) == 0 or
+                indicator_data.get('rsi', None) == 0 or
+                indicator_data.get('macd', None) == 0 or
+                indicator_data.get('dynamic_threshold', None) == 0 or
+                indicator_data.get('pca_signal', None) == 0 or
+                indicator_data.get('weekly_trend', None) == 'UNKNOWN'):
+                logging.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {indicator_data}")
+                return False
+
             # 安全に丸めるヘルパー関数
             def safe_round(value, ndigits=2):
                 try:
@@ -386,4 +420,29 @@ class StockRepository(BaseRepository):
         except Exception as e:
             self.logger.error(f"API応答データ挿入エラー: {e}")
             self.conn.rollback()
-            return False 
+            return False
+
+    def fetch_industry_name_prefix(self, code: str) -> Optional[str]:
+        """
+        指定された証券コードの業種名のテーブルプレフィックスを取得します
+        
+        Args:
+            code (str): 証券コード
+            
+        Returns:
+            Optional[str]: 業種名のテーブルプレフィックス、取得失敗時はNone
+        """
+        try:
+            query = """
+            SELECT industry_name
+            FROM companies
+            WHERE code = %s;
+            """
+            self.cur.execute(query, (code,))
+            result = self.cur.fetchone()
+            if result:
+                return TableCategory.get_table_prefix(result[0])
+            return None
+        except Exception as e:
+            self.logger.error(f"業種名取得エラー: {e}")
+            return None 

@@ -191,7 +191,13 @@ class StockPriceAPI:
 
 def _remove_trailing_zero(code):
     # 株式コードの末尾のゼロが存在する場合に削除します
-    return code[:-1] if code.endswith("0") else code
+    """
+    株式コードが5桁かつ末尾が「0」の場合にのみ、末尾の「0」を削除します。
+    それ以外の場合は必要以上に削除せず、元のコードを返します。
+    """
+    if len(code) == 5 and code.endswith("0"):
+        return code[:-1]
+    return code
 
 
 def fetch_batch_data_yfinance(stock_codes, expairy=None):

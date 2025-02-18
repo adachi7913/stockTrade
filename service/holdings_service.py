@@ -7,6 +7,7 @@ from repository.stock_repository import StockRepository
 from lib.table_category import TableCategory
 from Gemini.api_handler import ApiHandler
 from models.evaluation_result import EvaluationResult
+from lib.code_validator import validate_stock_code
 
 class HoldingsService:
     def __init__(self, logger: logging.Logger):
@@ -47,16 +48,16 @@ class HoldingsService:
         """
         try:
             # 企業情報を取得
-            company_info = self.stock_repository.fetch_company_info(code + "0")
-            if not company_info:
+            industry_name = self.stock_repository.fetch_industry_name_prefix(code + "0")
+            if not industry_name:
                 self.logger.error(f"企業情報が見つかりません: {code}")
                 return None
 
-            # 業種名から対応するテーブル接頭辞を取得
-            industry_name = TableCategory.get_table_prefix(company_info[10])
+            # 銘柄コードのバリデーション
+            validated_code = validate_stock_code(code)
             
             # 過去の価格とインジケーターを取得
-            stock_data = self.stock_repository.get_stock_full_data_period(code, industry_name)
+            stock_data = self.stock_repository.get_stock_full_data_period(validated_code, industry_name)
             if not stock_data:
                 self.logger.error(f"株価データが見つかりません: {code}")
                 return None

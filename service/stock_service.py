@@ -7,6 +7,7 @@ from repository.stock_repository import StockRepository
 from lib.accsess_yFinance_for_stockPrice import StockPriceAPI, fetch_batch_data_yfinance
 from lib.indicator_calculator import IndicatorCalculator
 from lib.table_category import TableCategory
+from lib.code_validator import validate_stock_code
 import os
 import logging
 import psycopg_pool
@@ -53,7 +54,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
         start_time = time.time()
 
         # 企業情報の一括取得
-        company_infos = {code: repository.fetch_company_info(code) for code in stock_codes}
+        company_infos = {code: repository.fetch_industry_name_prefix(code) for code in stock_codes}
         valid_codes = [code for code, info in company_infos.items() if info]
         
         if not valid_codes:
@@ -61,14 +62,7 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
             return
 
         # 業種名のマッピングを作成
-        industry_names = {}
-        for code in valid_codes:
-            try:
-                industry_name = company_infos[code][5]  # industry_nameのインデックス
-                industry_names[code] = TableCategory.get_table_prefix(industry_name)
-            except (IndexError, ValueError) as e:
-                logging.error(f"業種名の取得に失敗: {code}, {e}")
-                continue
+        industry_names = {code: company_infos[code] for code in valid_codes}
 
         # 環境変数による処理モードの判定
         pricing_flag = os.environ.get("PRICING_PROCESS_DONE", "n").lower() == "y"
@@ -111,10 +105,13 @@ def process_stock_batch(stock_codes: List[str], fetch_range: int, expected_days:
                 success = False
                 skip_retries = False
                 
+                # 銘柄コードのバリデーション
+                validated_code = validate_stock_code(code)
+                
                 for retry in range(max_retries):
                     try:
                         # StockPriceAPIクラスを使用して1銘柄ずつ処理
-                        api = StockPriceAPI(code, fetch_range)
+                        api = StockPriceAPI(validated_code, fetch_range)
                         single_data = api.fetch_data_yfinance()
                         
                         if single_data:
@@ -217,13 +214,16 @@ def run_stock_service(expiry=None, start_code=None):
     repository = StockRepository()
     stock_codes = repository.fetch_company_code_list()
     repository.close()
-    
+    # 5桁かつ末尾が'0'の場合は末尾の'0'を削除して、4桁のコードに変換する
+    stock_codes = [code[:-1] if len(code) == 5 and code.endswith('0') else code for code in stock_codes]
     if not stock_codes:
         logging.error("銘柄コードの取得に失敗しました。")
         return
 
     # 開始銘柄コードが指定されている場合、そこから処理を開始
     if start_code:
+        if len(start_code) == 5 and start_code.endswith('0'):
+            start_code = start_code[:-1]
         try:
             start_index = stock_codes.index(start_code)
             stock_codes = stock_codes[start_index:]
@@ -238,9 +238,9 @@ def run_stock_service(expiry=None, start_code=None):
         # daily_update用の設定
         # 株価データは5日分だが、インジケーター計算用に追加の日数を確保
         fetch_range = 5  # 株価データ取得用
-        indicator_days = 52  # インジケーター計算に必要な最小日数
-        extra_days = 40  # 余裕を持たせる日数（営業日ベース）を40日に増加
-        total_days = indicator_days + extra_days  # 合計92日
+        indicator_days = 78  # インジケーター計算に必要な最小日数
+        extra_days = 42  # 余裕を持たせる日数（営業日ベース）を42日に増加
+        total_days = indicator_days + extra_days  # 合計120日
         
         if os.environ.get("INDICATOR_PROCESS_DONE", "n").lower() == "y":
             # インジケーター計算が必要な場合は、十分な日数のデータを取得

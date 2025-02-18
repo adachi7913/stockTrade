@@ -1,7 +1,7 @@
+import os
 import requests
 
-from repository.stock_repository import StockRepository
-from util.date_util import get_current_datetime
+from utils.date_util import get_current_datetime
 
 # Discord Webhook URLs
 ERROR_URL = "https://discord.com/api/webhooks/1338074017449381918/KjUzGGg7-NF1YtxCuW_kw8uBK50OkOVHP-BMhiVFi-n3JhaBZJnhepn_7Ec0wQcSjomm"
@@ -52,7 +52,8 @@ def create_error_message(message):
     [エラー発生日]：{0}
     [エラー内容]：{1}
     """.format(get_current_datetime(), message)
-    send_to_discord(ERROR_URL, comment)
+    if os.environ.get("DEBUG_MODE") != "on":
+        send_to_discord(ERROR_URL, comment)
 
 if __name__ == "__main__":
     # テスト用サンプル（必要に応じて）

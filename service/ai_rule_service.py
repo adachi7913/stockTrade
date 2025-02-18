@@ -9,6 +9,7 @@ from repository.stock_repository import StockRepository
 from Gemini.api_handler import ApiHandler
 from lib.parse_response import parse_response
 from lib.table_category import TableCategory
+from lib.code_validator import validate_stock_code
 from discord.discord_notifier import create_error_message
 
 def run_ai_rule_generation(start_code=None):
@@ -34,13 +35,15 @@ def run_ai_rule_generation(start_code=None):
 
             repository = StockRepository()
             try:
-                company_info = repository.fetch_company_info(stock_code)
-                if not company_info:
+                industry_name = repository.fetch_industry_name_prefix(stock_code)
+                if not industry_name:
                     logging.error(f"企業情報取得失敗: {stock_code}")
                     return
 
-                industry_name = TableCategory.get_table_prefix(company_info[3])
-                full_data = repository.get_stock_full_data_period(stock_code, industry_name)
+                # 銘柄コードのバリデーション
+                validated_code = validate_stock_code(stock_code)
+                
+                full_data = repository.get_stock_full_data_period(validated_code, industry_name)
                 if not full_data:
                     logging.error(f"株価データ取得失敗: {stock_code}")
                     return
@@ -69,7 +72,7 @@ def run_ai_rule_generation(start_code=None):
                 # 最新の指標データを最新レコードから取得
                 atr = float(latest_record.get("atr", 0))
                 rsi_val = float(latest_record.get("rsi", 0))
-                stoch_k = float(latest_record.get("stoch", {}).get("stoch_k", 0))
+                stoch_k = float(latest_record.get("stoch_k", 0))
                 if not filter_stock(stock_code, close_price, market_cap, last_entry_date, no_entry_span, volume_data, atr, rsi_val, stoch_k):
                     return
 
