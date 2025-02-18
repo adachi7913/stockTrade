@@ -274,23 +274,23 @@ class StockRepository(BaseRepository):
         """
         table_name = f"{industry_name}_indicator"
         try:
-            # 追加：インジケーター計算に必要なデータが不足している場合は、INSERTをスキップしログ出力する
-            if (indicator_data.get('ichimoku_tenkan', None) == 0 or
-                indicator_data.get('ichimoku_kijun', None) == 0 or
-                indicator_data.get('ichimoku_senkou_a', None) == 0 or
-                indicator_data.get('ichimoku_senkou_b', None) == 0 or
-                indicator_data.get('adx', None) == 0 or
-                indicator_data.get('bb_lower', None) == 0 or
-                indicator_data.get('bb_middle', None) == 0 or
-                indicator_data.get('bb_upper', None) == 0 or
-                indicator_data.get('stoch_k', None) == 0 or
-                indicator_data.get('stoch_d', None) == 0 or
-                indicator_data.get('atr', None) == 0 or
-                indicator_data.get('rsi', None) == 0 or
-                indicator_data.get('macd', None) == 0 or
-                indicator_data.get('dynamic_threshold', None) == 0 or
-                indicator_data.get('pca_signal', None) == 0 or
-                indicator_data.get('weekly_trend', None) == 'UNKNOWN'):
+            # 変更：インジケーター計算に必要なデータが不足している場合は、INSERTをスキップしログ出力する
+            if (indicator_data.get('ichimoku_tenkan') is None or
+                indicator_data.get('ichimoku_kijun') is None or
+                indicator_data.get('ichimoku_senkou_a') is None or
+                indicator_data.get('ichimoku_senkou_b') is None or
+                indicator_data.get('adx') is None or
+                indicator_data.get('bb_lower') is None or
+                indicator_data.get('bb_middle') is None or
+                indicator_data.get('bb_upper') is None or
+                indicator_data.get('stoch_k') is None or
+                indicator_data.get('stoch_d') is None or
+                indicator_data.get('atr') is None or
+                indicator_data.get('rsi') is None or
+                indicator_data.get('macd') is None or
+                indicator_data.get('dynamic_threshold') is None or
+                indicator_data.get('pca_signal') is None or
+                indicator_data.get('weekly_trend') is None):
                 logging.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {indicator_data}")
                 return False
 

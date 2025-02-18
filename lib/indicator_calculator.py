@@ -146,6 +146,10 @@ class IndicatorCalculator:
                     logging.error(f"Error calculating indicators for date {row['date']}: {str(e)}")
                     continue
 
+            # forループ終了後
+            expected_calculations = len(self.df) - (min_required_records - 1)
+            if len(results) < expected_calculations:
+                logging.warning(f"期待される計算件数は {expected_calculations} 件ですが、実際の計算結果は {len(results)} 件でした。データ不良の可能性があります。")
             return results
         except Exception as e:
             logging.error(f"Error in calculate_indicators: {str(e)}")
@@ -208,22 +212,22 @@ class IndicatorCalculator:
                     'low': latest_row.get('low', 0),
                     'close': latest_row.get('close', 0),
                     'volume': latest_row.get('volume', 0),
-                    'ichimoku_tenkan': 0,
-                    'ichimoku_kijun': 0,
-                    'ichimoku_senkou_a': 0,
-                    'ichimoku_senkou_b': 0,
-                    'adx': 0,
-                    'bb_lower': 0,
-                    'bb_middle': 0,
-                    'bb_upper': 0,
-                    'stoch_k': 0,
-                    'stoch_d': 0,
-                    'atr': 0,
-                    'rsi': 0,
-                    'macd': 0,
-                    'dynamic_threshold': 0,
-                    'weekly_trend': "UNKNOWN",
-                    'pca_signal': 0
+                    'ichimoku_tenkan': None,
+                    'ichimoku_kijun': None,
+                    'ichimoku_senkou_a': None,
+                    'ichimoku_senkou_b': None,
+                    'adx': None,
+                    'bb_lower': None,
+                    'bb_middle': None,
+                    'bb_upper': None,
+                    'stoch_k': None,
+                    'stoch_d': None,
+                    'atr': None,
+                    'rsi': None,
+                    'macd': None,
+                    'dynamic_threshold': None,
+                    'weekly_trend': None,
+                    'pca_signal': None
                 }]
 
             results = []
@@ -267,6 +271,10 @@ class IndicatorCalculator:
                     logging.error(f"Error calculating indicators for date {row['date']}: {str(e)}")
                     continue
 
+            # forループ終了後
+            expected_calculations = len(self.df) - (min_required_records - 1)
+            if len(results) < expected_calculations:
+                logging.warning(f"期待される計算件数は {expected_calculations} 件ですが、実際の計算結果は {len(results)} 件でした。データ不良の可能性があります。")
             return results
         except Exception as e:
             logging.error(f"Error in calculate_indicators: {str(e)}")

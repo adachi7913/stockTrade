@@ -264,9 +264,9 @@ def run_stock_service(expiry=None, start_code=None):
             
         logging.info(f"取得期間: {years}年")
         business_days = years * 252  # 営業日数
-        extra_days = 90  # 余裕を持たせる日数
+        extra_days = 120  # 余裕を持たせる日数
         fetch_range = (years * 365) + extra_days  # 実際の取得日数
-        expected_days = business_days + 52  # 予想される最大データ数
+        expected_days = business_days + 78  # 予想される最大データ数
         logging.info(f"全期間取得モード: {years}年分のデータを取得します（営業日数: {business_days}日, 取得日数: {fetch_range}日）")
 
     # システムリソースに基づいて最適なワーカー数とバッチサイズを決定
