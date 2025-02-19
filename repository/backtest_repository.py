@@ -1,0 +1,57 @@
+import os
+import psycopg
+import pandas as pd
+from dotenv import load_dotenv
+from repository.base_repository import BaseRepository
+from repository.stock_repository import StockRepository
+import logging
+
+load_dotenv()
+
+class BacktestRepository(BaseRepository):
+    def __init__(self):
+        super().__init__()
+        self.stock_repository = StockRepository()
+        self.logger = logging.getLogger(__name__)
+
+    def fetch_historical_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        指定された銘柄の株価データを取得します。
+        
+        Args:
+            symbol (str): 証券コード
+            start_date (str): 開始日（YYYY-MM-DD形式）
+            end_date (str): 終了日（YYYY-MM-DD形式）
+            
+        Returns:
+            pd.DataFrame: 株価データ
+        """
+        try:
+            # 業種名のプレフィックスを取得
+            industry_name = self.stock_repository.fetch_industry_name_prefix(symbol + "0")
+            if not industry_name:
+                self.logger.error(f"業種名が取得できません: {symbol}")
+                return pd.DataFrame()
+
+            # 業種別テーブルから株価データを取得
+            query = """
+                SELECT date, open, high, low, close, volume 
+                FROM {}_price
+                WHERE code = %s AND date BETWEEN %s AND %s
+                ORDER BY date ASC;
+            """.format(industry_name)
+
+            df = pd.read_sql(query, self.conn, params=(symbol, start_date, end_date))
+            return df
+
+        except Exception as e:
+            self.logger.error(f"株価データ取得エラー: {e}")
+            return pd.DataFrame()
+
+    def close(self):
+        """
+        データベース接続をクローズします。
+        """
+        super().close()
+        if hasattr(self, 'stock_repository'):
+            self.stock_repository.close()
