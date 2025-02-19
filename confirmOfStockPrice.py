@@ -65,5 +65,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         start_code = sys.argv[1]
         logger.info(f"開始銘柄コード: {start_code}")
-    
+        
+    # 次回3267から
     run_stock_service(expiry=fetch_range, start_code=start_code)  # 整数に変換した値を渡す 
