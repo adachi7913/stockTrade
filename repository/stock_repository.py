@@ -235,6 +235,55 @@ class StockRepository(BaseRepository):
             self.logger.error(f"時価総額取得エラー: {e}")
             return None
 
+    def get_stock_price_only(self, code: str, industry_name: str) -> List[Dict]:
+        """
+        指定された証券コードの株価データのみを取得します
+        
+        Args:
+            code (str): 証券コード（4桁）
+            industry_name (str): 業種名
+            
+        Returns:
+            List[Dict]: 株価データのリスト
+        """
+        try:
+            # 環境変数から取得日数を取得
+            fetch_range = os.getenv("FETCH_DATA_RANGE", "1")  # 範囲は年数。デフォルトは1年
+            
+            query = """
+            SELECT code, date, open, high, low, close, volume
+            FROM {}_price
+            WHERE code = %s
+            AND date BETWEEN (CURRENT_DATE - (%s || ' years')::interval) AND CURRENT_DATE
+            ORDER BY date ASC;
+            """.format(industry_name)
+            
+            self.cur.execute(query, (code, fetch_range))
+            rows = self.cur.fetchall()
+            
+            if not rows:
+                self.logger.error(f"株価データが取得できませんでした: code={code}, industry_name={industry_name}")
+                return []
+            
+            result = []
+            for row in rows:
+                data = {
+                    'code': str(row[0]) if not isinstance(row[0], str) else row[0],
+                    'date': row[1].strftime('%Y%m%d') if isinstance(row[1], (datetime, date)) else row[1],
+                    'open': float(row[2]),
+                    'high': float(row[3]),
+                    'low': float(row[4]),
+                    'close': float(row[5]),
+                    'volume': int(row[6])
+                }
+                result.append(data)
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"株価データ取得エラー: {e}")
+            return []
+
     def fetch_no_entry_info(self, code: str) -> Optional[tuple]:
         """
         指定された銘柄コードに対して、api_responseテーブルから最新のAPI応答の date と rule_period を

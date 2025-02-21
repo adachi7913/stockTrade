@@ -460,7 +460,7 @@ class IndicatorCalculator:
             # 欠損値、無限大のチェックと補完
             indicators = indicators.ffill().bfill()
             if not indicators.replace([np.inf, -np.inf], np.nan).notna().all().all():
-                logging.warning("無限大または非数値が検出されました")
+                # logging.warning("無限大または非数値が検出されました")
                 return 0
             # PCAには最低20日分の行が必要
             if len(indicators) >= 20:
