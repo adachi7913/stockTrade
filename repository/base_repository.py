@@ -1,32 +1,64 @@
 import os
-import psycopg
+import psycopg2
 from dotenv import load_dotenv
 import logging
 from typing import Optional
 
 class BaseRepository:
-    def __init__(self, logger: Optional[logging.Logger] = None):
-        self.logger = logger or logging.getLogger(__name__)
-        load_dotenv()
-        
+    def __init__(self):
+        """
+        データベースリポジトリの基底クラス
+        """
+        self.logger = logging.getLogger(__name__)
+        self.conn = None
+        self.cur = None
+        self.connect()
+
+    def connect(self):
+        """
+        データベースに接続します
+        """
         try:
-            self.conn = psycopg.connect(
-                host=os.environ.get("DB_HOST"),
-                dbname=os.environ.get("DB_NAME"),
-                user=os.environ.get("DB_USER"),
-                password=os.environ.get("DB_PASSWORD")
-            )
+            load_dotenv()
+            self.conn = self.get_connection()
             self.cur = self.conn.cursor()
         except Exception as e:
             self.logger.error(f"データベース接続エラー: {e}")
             raise
 
-    def close(self):
-        """データベース接続のクローズ"""
+    def get_connection(self):
+        """
+        データベース接続を取得します
+        
+        Returns:
+            psycopg2.extensions.connection: データベース接続オブジェクト
+        """
         try:
-            if hasattr(self, 'cur') and not self.cur.closed:
+            return psycopg2.connect(
+                host=os.getenv("DB_HOST", "localhost"),
+                port=os.getenv("DB_PORT", "5432"),
+                database=os.getenv("DB_NAME", "stock_trade"),
+                user=os.getenv("DB_USER", "postgres"),
+                password=os.getenv("DB_PASSWORD", "postgres")
+            )
+        except Exception as e:
+            self.logger.error(f"データベース接続取得エラー: {e}")
+            raise
+
+    def close(self):
+        """
+        データベース接続を閉じます
+        """
+        try:
+            if self.cur:
                 self.cur.close()
-            if hasattr(self, 'conn') and not self.conn.closed:
+            if self.conn and not self.conn.closed:
                 self.conn.close()
         except Exception as e:
-            self.logger.error(f"DB接続クローズエラー: {e}") 
+            self.logger.error(f"データベース切断エラー: {e}")
+
+    def __del__(self):
+        """
+        デストラクタ：リソースの解放を確実に行います
+        """
+        self.close() 

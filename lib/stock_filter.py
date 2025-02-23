@@ -4,7 +4,7 @@ import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
-def filter_stock(stock_code, close, market_cap, last_no_entry_date=None, no_entry_span=None, volume_data=None, atr=None, rsi=None, stoch_k=None, min_close_threshold=300, close_threshold=2000, market_cap_threshold=1_000_000_000):
+def filter_stock(stock_code, close, market_cap, last_no_entry_date=None, no_entry_span=None, volume_data=None, atr=None, rsi=None, stoch_k=None, min_close_threshold=300, close_threshold=3000, market_cap_threshold=1_000_000_000):
     """
     指定した銘柄を以下の条件でフィルタリングする関数
     

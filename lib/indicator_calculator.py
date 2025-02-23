@@ -5,6 +5,8 @@ import pandas_ta as ta
 from sklearn.decomposition import PCA
 import logging
 from sklearn.preprocessing import StandardScaler
+import psutil
+import time
 
 
 class IndicatorCalculator:
@@ -29,6 +31,10 @@ class IndicatorCalculator:
         
         # データの品質チェック
         self.check_data_quality()
+        
+        # PCA計算用の設定
+        self.pca_batch_size = 100  # PCA計算のバッチサイズ
+        self.max_cpu_percent = 80  # CPU使用率の上限
 
     def validate_input_data(self, data):
         """入力データの検証"""
@@ -80,6 +86,12 @@ class IndicatorCalculator:
         if not all(self.df['low'] <= self.df['open']) or not all(self.df['low'] <= self.df['close']):
             logging.error("Low price is higher than open/close price")
 
+    def _check_cpu_usage(self):
+        """CPU使用率をチェックし、必要に応じて一時停止"""
+        if psutil.cpu_percent(interval=1) > self.max_cpu_percent:
+            logging.debug("CPU使用率が高いため、処理を一時停止します")
+            time.sleep(2)
+
     def calculate_indicators(self):
         """全てのインジケーターを計算"""
         try:
@@ -112,6 +124,9 @@ class IndicatorCalculator:
             for idx, row in self.df.iterrows():
                 if idx < min_required_records - 1:
                     continue
+
+                # CPU使用率をチェック
+                self._check_cpu_usage()
 
                 window_data = self.df.iloc[max(0, idx - min_required_records + 1):idx + 1]
                 

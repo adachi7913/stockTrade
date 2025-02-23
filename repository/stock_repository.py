@@ -247,6 +247,10 @@ class StockRepository(BaseRepository):
             List[Dict]: 株価データのリスト
         """
         try:
+            # 接続状態を確認し、必要に応じて再接続
+            if not self.is_connected():
+                self.reconnect()
+            
             # 環境変数から取得日数を取得
             fetch_range = os.getenv("FETCH_DATA_RANGE", "1")  # 範囲は年数。デフォルトは1年
             
@@ -282,7 +286,42 @@ class StockRepository(BaseRepository):
             
         except Exception as e:
             self.logger.error(f"株価データ取得エラー: {e}")
+            # エラー発生時に再接続を試みる
+            try:
+                self.reconnect()
+            except Exception as reconnect_error:
+                self.logger.error(f"データベース再接続エラー: {reconnect_error}")
             return []
+
+    def is_connected(self) -> bool:
+        """
+        データベース接続が有効かどうかを確認します
+        
+        Returns:
+            bool: 接続が有効な場合はTrue
+        """
+        try:
+            # 簡単なクエリを実行してみる
+            self.cur.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+
+    def reconnect(self):
+        """データベース接続を再確立します"""
+        try:
+            if self.conn:
+                if not self.conn.closed:
+                    self.conn.close()
+            if self.cur:
+                self.cur.close()
+            
+            self.conn = self.get_connection()
+            self.cur = self.conn.cursor()
+            self.logger.info("データベース接続を再確立しました")
+        except Exception as e:
+            self.logger.error(f"データベース再接続失敗: {e}")
+            raise
 
     def fetch_no_entry_info(self, code: str) -> Optional[tuple]:
         """

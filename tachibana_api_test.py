@@ -44,7 +44,7 @@ def main():
     # コマンドライン引数から開始コードを取得
     start_code = sys.argv[1] if len(sys.argv) > 1 else None
     if start_code is None:
-        start_code = "4763"
+        start_code = "9880"
     try:
         api = TachibanaStockAPI()
         api.execute_stock_price_retrieval(start_code)
