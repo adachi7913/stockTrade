@@ -25,7 +25,7 @@
 #
 
 import urllib3
-import datetime
+from datetime import datetime  # datetime.datetimeではなく、datetimeを直接使用
 import json
 import time
 import sys
@@ -33,6 +33,11 @@ from pathlib import Path
 import logging
 from repository.stock_repository import StockRepository
 import threading
+from collections import deque
+from threading import Lock
+import signal
+import pandas as pd
+from lib.indicator_calculator import IndicatorCalculator
 
 
 
@@ -239,8 +244,8 @@ def func_make_url_request(auth_flg, \
 # 備考: APIに接続し、requestの文字列を送信し、応答データを辞書型で返す。
 #       master取得は専用の func_api_req_muster を利用する。
 def func_api_req(str_url): 
-    print('送信文字列＝')
-    print(str_url)  # 送信する文字列
+    # print('送信文字列＝')
+    # print(str_url)  # 送信する文字列
 
     # APIに接続
     http = urllib3.PoolManager()
@@ -251,8 +256,8 @@ def func_api_req(str_url):
     bytes_reqdata = req.data
     str_shiftjis = bytes_reqdata.decode("shift-jis", errors="ignore")
 
-    print('返信文字列＝')
-    print(str_shiftjis)
+    # print('返信文字列＝')
+    # print(str_shiftjis)
 
     # JSON形式の文字列を辞書型で取り出す
     json_req = json.loads(str_shiftjis)
@@ -273,7 +278,7 @@ def func_login(int_p_no, my_url, str_userid, str_passwd, class_cust_property):
     # p2/46 No.1 引数名:CLMAuthLoginRequest を参照してください。
     
     req_item = [class_req()]
-    str_p_sd_date = func_p_sd_date(datetime.datetime.now())     # システム時刻を所定の書式で取得
+    str_p_sd_date = func_p_sd_date(datetime.now())     # datetime.datetime.now() から datetime.now() に変更
 
     str_key = '"p_no"'
     str_value = func_check_json_dquat(str(int_p_no))
@@ -380,7 +385,7 @@ def func_logout(int_p_no, class_cust_property):
     # p3/46 No.3 引数名:CLMAuthLogoutRequest を参照してください。
     
     req_item = [class_req()]
-    str_p_sd_date = func_p_sd_date(datetime.datetime.now())     # システム時刻を所定の書式で取得
+    str_p_sd_date = func_p_sd_date(datetime.now())     # datetime.datetime.now() から datetime.now() に変更
 
     str_key = '"p_no"'
     str_value = func_check_json_dquat(str(int_p_no))
@@ -557,7 +562,7 @@ def func_get_daily_price(int_p_no,
     # p4/46 No.5 引数名:CLMKabuNewOrder を参照してください。
 
     req_item = [class_req()]
-    str_p_sd_date = func_p_sd_date(datetime.datetime.now())     # システム時刻を所定の書式で取得
+    str_p_sd_date = func_p_sd_date(datetime.now())     # datetime.datetime.now() から datetime.now() に変更
 
     str_key = '"p_no"'
     str_value = func_check_json_dquat(str(int_p_no))
@@ -600,6 +605,19 @@ def func_get_daily_price(int_p_no,
                                      req_item)
     # API問合せ
     json_return = func_api_req(str_url)
+
+    price_history = json_return.get('aCLMMfdsMarketPriceHistory')
+    if price_history:
+        total_days = len(price_history)
+        date_range = None
+        if total_days > 0:
+            oldest_date = price_history[-1]['sDate']
+            newest_date = price_history[0]['sDate']
+            date_range = f"期間: {oldest_date} ～ {newest_date}"
+        
+        # グローバルなロガーを使用
+        logger = logging.getLogger()
+        logger.info(f"取得した価格履歴数: {total_days}日分 {date_range if date_range else ''}")
 
     return json_return
 
@@ -710,12 +728,59 @@ def func_write_daily_price(str_fname_output, list_return):
 # ==== プログラム始点 =================================================================================
 # ======================================================================================================
 
+class RateLimiter:
+    def __init__(self, max_requests, time_window, logger):
+        self.max_requests = max_requests
+        self.time_window = time_window
+        self.requests = deque()
+        self.lock = Lock()
+        self.logger = logger
+    
+    def acquire(self):
+        with self.lock:
+            now = time.time()
+            
+            # 時間枠外のリクエストを削除
+            while self.requests and self.requests[0] <= now - self.time_window:
+                self.requests.popleft()
+            
+            # リクエスト数が上限に達している場合は待機
+            if len(self.requests) >= self.max_requests:
+                sleep_time = self.requests[0] - (now - self.time_window)
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                    now = time.time()
+            
+            # 新しいリクエストを記録
+            self.requests.append(now)
+
+            # 現在のリクエスト数をログ出力
+            current_requests = len(self.requests)
+            if current_requests >= self.max_requests:
+                self.logger.debug(f"レートリミット到達: {current_requests}件のリクエスト")
+
 class TachibanaStockAPI:
-    def __init__(self, num_threads=4):
+    def __init__(self, num_threads=1):
         self.logger = logging.getLogger()
         self.repo = StockRepository()
         self.num_threads = num_threads
         self.lock = threading.Lock()
+        self.rate_limiter = RateLimiter(
+            max_requests=8, 
+            time_window=1.0,
+            logger=self.logger
+        )
+        self.execution_mode = None
+        self.stop_requested = False
+        
+        # シグナルハンドラを設定
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+    def _signal_handler(self, signum, frame):
+        """シグナルを受け取った時の処理"""
+        self.logger.warning('\n停止リクエストを受け付けました。実行中の処理が完了するまでお待ちください...')
+        self.stop_requested = True
 
     def load_credentials(self):
         """認証情報ファイルから設定を読み込む"""
@@ -727,6 +792,13 @@ class TachibanaStockAPI:
                     if line and not line.startswith('#'):
                         key, value = line.split('=', 1)
                         credentials[key.strip()] = value.strip()
+            
+            # 実行モードの取得（デフォルトはfull）
+            self.execution_mode = credentials.get('EXECUTION_MODE', 'full').lower()
+            if self.execution_mode not in ['daily', 'full']:
+                self.logger.warning(f"無効な実行モード: {self.execution_mode}、デフォルトの'full'を使用します")
+                self.execution_mode = 'full'
+                
         except FileNotFoundError:
             raise FileNotFoundError(
                 "認証情報ファイル(.tachibana_credentials)が見つかりません。"
@@ -734,59 +806,84 @@ class TachibanaStockAPI:
                 "TACHIBANA_API_URL=https://demo-kabuka.e-shiten.jp/e_api_v4r6/\n"
                 "TACHIBANA_USER_ID=your_user_id\n"
                 "TACHIBANA_PASSWORD=your_password\n"
-                "TACHIBANA_SECOND_PASSWORD=your_second_password"
+                "TACHIBANA_SECOND_PASSWORD=your_second_password\n"
+                "EXECUTION_MODE=daily  # または full"
             )
         return credentials
 
     def get_stock_codes(self):
-        """StockRepositoryから株価コード一覧を取得し、4桁のコードに変換します"""
         codes = self.repo.fetch_company_code_list()
-        
-        # 5桁かつ末尾が0のコードは4桁に変換
+        self.logger.debug(f"DBから取得した銘柄コード一覧: {codes}")
+        # APIで使用する4桁コードに変換
         formatted_codes = []
         for code in codes:
-            if len(code) == 5 and code.endswith('0'):
+            if len(code) == 5:
+                # 末尾の0を削除して4桁に
                 formatted_codes.append(code[:-1])
             else:
-                formatted_codes.append(code)
+                self.logger.warning(f"不正な長さの銘柄コード: {code}")
+                continue
         
         return formatted_codes
 
     def process_stock_code(self, code, class_cust_property, int_p_no):
-        """個別の株価データを処理する"""
+        # 停止フラグのチェックを追加
+        if self.stop_requested:
+            return  # ログ出力なしで静かにスキップ
+
         try:
+            self.logger.debug(f"処理開始: コード={code}")
             self.logger.info(f'銘柄コード {code} の株価データを取得します')
             
-            # 業種名を取得（5桁コードに変換）
-            code_5digit = code + "0"
-            industry_name = self.repo.fetch_industry_name_prefix(code_5digit)
-            if not industry_name:
-                self.logger.warning(f'銘柄コード {code} の業種名が取得できませんでした。スキップします。')
+            # 業種名を取得（DBに格納されている形式の5桁コードを使用）
+            code_5digit = code + "0" if len(code) == 4 else code  # 既に5桁の場合はそのまま
+            try:
+                industry_name = self.repo.fetch_industry_name_prefix(code_5digit)
+                if not industry_name:
+                    self.logger.warning(f'銘柄コード {code}（5桁：{code_5digit}）の業種名が取得できませんでした。スキップします。')
+                    return
+            except Exception as e:
+                self.logger.error(f'業種名取得エラー（コード：{code}、5桁：{code_5digit}）: {str(e)}')
                 return
             
-            self.logger.info(f'業種名: {industry_name}')
+            self.logger.info(f'銘柄コード {code} の業種名: {industry_name}')
             
             # 株価データ取得用のパラメータを設定
             my_sIssueCode = code
             my_sSizyouC = '00'
             
+            # レートリミッターを使用
+            self.rate_limiter.acquire()
+            
             with self.lock:
                 # 株価データを取得
                 dic_return = func_get_daily_price(int_p_no, my_sIssueCode, my_sSizyouC, class_cust_property)
+                self.logger.debug(f"API応答: {dic_return}")  # APIからの応答全体を確認
             
             # 日足株価部分をリスト型で抜き出す
             price_history = dic_return.get('aCLMMfdsMarketPriceHistory')
-            
             if price_history:
+                self.logger.debug(f"取得した価格履歴数: {len(price_history)}")
+                if self.execution_mode == 'daily':
+                    self.logger.debug(f"最新の日付: {price_history[0]['sDate']}")
+                
                 self.logger.info(f'銘柄コード {code} の株価データをDBに保存します')
+                
+                # dailyモードの場合、直近5営業日のデータのみを処理
+                if self.execution_mode == 'daily':
+                    price_history = sorted(price_history, key=lambda x: x['sDate'], reverse=True)[:5]
                 
                 # 日毎のデータをDBに保存
                 for daily_price in price_history:
                     try:
-                        # 株価データを整形
+                        # 日付形式を変換（'YYYYMMDD' → 'YYYY-MM-DD'）
+                        date_str = daily_price['sDate']
+                        formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                        
+                        # 株価データを整形（4桁コードを使用）
                         price_data = {
-                            'code': code,
-                            'date': daily_price['sDate'],
+                            'code': code,  # 4桁コードをそのまま使用
+                            'date': formatted_date,
                             'open': float(daily_price['pDOP']),
                             'high': float(daily_price['pDHP']),
                             'low': float(daily_price['pDLP']),
@@ -794,10 +891,15 @@ class TachibanaStockAPI:
                             'volume': int(daily_price['pDV'])
                         }
                         
-                        # DBに保存
+                        # DBに保存を試みる前にログ出力を追加
+                        self.logger.debug(f"保存するデータ: {price_data}")
+                        
+                        # DBに保存（industry_nameと4桁コードを使用）
                         success = self.repo.insert_stock_price_data(price_data, industry_name)
                         if not success:
-                            self.logger.warning(f"日付 {daily_price['sDate']} のデータ保存に失敗しました")
+                            self.logger.warning(f"日付 {formatted_date} のデータ保存に失敗しました")
+                        else:
+                            self.logger.debug(f"日付 {formatted_date} のデータを保存しました")
                         
                     except Exception as e:
                         self.logger.error(f"データ保存中にエラーが発生しました: {str(e)}")
@@ -807,16 +909,22 @@ class TachibanaStockAPI:
             else:
                 self.logger.warning(f'銘柄コード {code} の株価データが取得できませんでした')
             
-            # APIレート制限のため1秒待機
-            # time.sleep(1)
+            if success:  # 株価データの保存が成功した場合
+                # インジケーター計算・保存を実行
+                indicator_success = self.calculate_and_save_indicators(code, industry_name)
+                if indicator_success:
+                    self.logger.info(f"銘柄コード {code} の全処理が完了しました")
             
         except Exception as e:
             self.logger.error(f'銘柄コード {code} の処理中にエラーが発生しました: {str(e)}')
 
     def execute_stock_price_retrieval(self, start_code=None):
         """株価データ取得処理を実行します"""
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
         import threading
+
+        # 停止フラグを初期化
+        self.stop_requested = False
 
         # 認証情報を読み込む
         credentials = self.load_credentials()
@@ -844,12 +952,10 @@ class TachibanaStockAPI:
             return
 
         try:
-            self.logger.info('株価データの取得を開始します')
+            self.logger.info(f'株価データの取得を開始します（実行モード: {self.execution_mode}）')
             
-            # 株価コード一覧を取得
             stock_codes = self.get_stock_codes()
             
-            # 開始コードが指定されている場合、そのコードから処理を開始
             if start_code:
                 try:
                     start_index = stock_codes.index(start_code)
@@ -862,10 +968,15 @@ class TachibanaStockAPI:
             self.logger.info(f'処理対象銘柄数: {total_codes}')
             self.logger.info(f'使用スレッド数: {self.num_threads}')
 
-            # ThreadPoolExecutorを使用してマルチスレッド処理を実行
             with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
                 futures = []
+                completed_count = 0
+
+                # 銘柄コードを処理
                 for idx, code in enumerate(stock_codes, 1):
+                    if self.stop_requested:
+                        break  # 静かに処理を中断
+
                     future = executor.submit(
                         self.process_stock_code,
                         code,
@@ -874,23 +985,80 @@ class TachibanaStockAPI:
                     )
                     futures.append(future)
 
-                # 全てのタスクの完了を待機
-                for idx, future in enumerate(futures, 1):
-                    try:
-                        future.result()
-                        self.logger.info(f'進捗: {idx}/{total_codes} ({(idx/total_codes*100):.1f}%)')
-                    except Exception as e:
-                        self.logger.error(f'タスク実行中にエラーが発生しました: {str(e)}')
-                
+                # 実行中のタスクの完了を待機
+                while futures and not self.stop_requested:
+                    # 完了したタスクを確認
+                    done, futures = wait(futures, return_when=FIRST_COMPLETED)
+                    
+                    for future in done:
+                        try:
+                            future.result()
+                            completed_count += 1
+                            self.logger.info(f'進捗: {completed_count}/{total_codes} ({(completed_count/total_codes*100):.1f}%)')
+                        except Exception as e:
+                            self.logger.error(f'タスク実行中にエラーが発生しました: {str(e)}')
+
+                if self.stop_requested:
+                    # 実行中のタスクの完了を待機（ログ出力なし）
+                    for future in futures:
+                        try:
+                            future.result()
+                        except Exception as e:
+                            self.logger.error(f'タスク実行中にエラーが発生しました: {str(e)}')
+
         except Exception as e:
-            self.logger.error(f'エラーが発生しました: {str(e)}')
+            self.logger.error(f"エラーが発生しました: {str(e)}")
             raise
         
         finally:
-            self.logger.info('\nログアウトを実行します')
-            int_p_no = len(stock_codes) + 2
-            bool_logout = func_logout(int_p_no, class_cust_property)
-            if bool_logout:
-                self.logger.info('ログアウトに成功しました')
-            else:
-                self.logger.error('ログアウトに失敗しました')
+            # ログアウト処理
+            try:
+                self.logger.info('\nログアウトを実行します')
+                int_p_no = total_codes + 2
+                bool_logout = func_logout(int_p_no, class_cust_property)
+                if bool_logout:
+                    self.logger.info('ログアウトに成功しました')
+                else:
+                    self.logger.error('ログアウトに失敗しました')
+            except Exception as e:
+                self.logger.error(f'ログアウト中にエラーが発生しました: {str(e)}')
+
+    def calculate_and_save_indicators(self, code: str, industry_name: str):
+        """株価データを取得してインジケーターを計算・保存"""
+        try:
+            # DBから株価データを取得（最新100営業日分）
+            price_data = self.repo.fetch_stock_prices(code, industry_name, limit=100)
+            
+            if not price_data:
+                self.logger.warning(f"銘柄コード {code} の株価データが見つかりません")
+                return False
+            
+            self.logger.info(f"銘柄コード {code} のインジケーター計算を開始します（データ数: {len(price_data)}日分）")
+            
+            # 日付でソート（古い順）
+            price_data = sorted(price_data, key=lambda x: x['date'])
+            
+            # インジケーター計算
+            calculator = IndicatorCalculator(price_data)
+            indicators = calculator.get_indicators()
+            
+            if indicators:
+                self.logger.info(f"銘柄コード {code} のインジケーター計算が完了しました（結果件数: {len(indicators)}件）")
+                # インジケーターをDBに保存
+                success = self.repo.insert_indicators(code, industry_name, indicators)
+                if success:
+                    self.logger.info(f"銘柄コード {code} のインジケーター計算・保存が完了しました")
+                    # 最新のインジケーター値をログ出力
+                    latest = indicators[-1]
+                    self.logger.info(f"最新のインジケーター値（{latest['date']}）:")
+                    self.logger.info(f"  一目均衡表: 転換線={latest['ichimoku_tenkan']:.2f}, 基準線={latest['ichimoku_kijun']:.2f}")
+                    self.logger.info(f"  ボリンジャーバンド: 上限={latest['bb_upper']:.2f}, 中央={latest['bb_middle']:.2f}, 下限={latest['bb_lower']:.2f}")
+                    self.logger.info(f"  RSI: {latest['rsi']:.2f}, MACD: {latest['macd']:.2f}")
+                return success
+            
+            self.logger.warning(f"銘柄コード {code} のインジケーター計算結果が空です")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"インジケーター計算中にエラーが発生しました: {str(e)}")
+            return False

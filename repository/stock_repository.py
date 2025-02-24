@@ -524,24 +524,170 @@ class StockRepository(BaseRepository):
     def fetch_industry_name_prefix(self, code: str) -> Optional[str]:
         """
         指定された証券コードの業種名のテーブルプレフィックスを取得します
-        
-        Args:
-            code (str): 証券コード
-            
-        Returns:
-            Optional[str]: 業種名のテーブルプレフィックス、取得失敗時はNone
         """
         try:
             query = """
-            SELECT industry_name
+            SELECT industry_name, code, date
             FROM companies
-            WHERE code = %s;
+            WHERE code = %s
+            ORDER BY date DESC
+            LIMIT 1;
             """
+            # SQLクエリの内容を確認
+            formatted_query = self.cur.mogrify(query, (code,)).decode('utf-8')
+            self.logger.debug(f"実行SQL: {formatted_query}")
+            
             self.cur.execute(query, (code,))
             result = self.cur.fetchone()
+            
             if result:
-                return TableCategory.get_table_prefix(result[0])
-            return None
+                industry_name = result[0]
+                db_code = result[1]
+                db_date = result[2]
+                self.logger.debug(f"DBから取得した結果: industry_name='{industry_name}', code='{db_code}', date='{db_date}'")
+                
+                # 空白文字を除去
+                industry_name = industry_name.strip()
+                self.logger.debug(f"空白除去後の業種名: '{industry_name}' (len={len(industry_name)})")
+                
+                try:
+                    # 利用可能なカテゴリーを出力
+                    available_categories = [c.japanese for c in TableCategory]
+                    self.logger.debug(f"利用可能なカテゴリー: {available_categories}")
+                    
+                    table_prefix = TableCategory.get_table_prefix(industry_name)
+                    self.logger.debug(f"変換後のテーブル接頭辞: {table_prefix}")
+                    return table_prefix
+                except ValueError as e:
+                    self.logger.error(f"業種名の変換に失敗: {str(e)}")
+                    return None
+            else:
+                self.logger.warning(f"コード {code} の業種情報が見つかりません")
+                return None
+            
         except Exception as e:
-            self.logger.error(f"業種名取得エラー: {e}")
-            return None 
+            self.logger.error(f"業種名取得エラー（コード: {code}）: {e}")
+            return None
+
+    def fetch_stock_prices(self, code: str, industry_name: str, limit: int = 100) -> List[Dict]:
+        """
+        指定された銘柄の株価データを取得
+        
+        Args:
+            code (str): 銘柄コード（4桁）
+            industry_name (str): 業種名のテーブルプレフィックス
+            limit (int): 取得する日数
+            
+        Returns:
+            List[Dict]: 株価データのリスト
+        """
+        try:
+            query = f"""
+            SELECT date, open, high, low, close, volume
+            FROM {industry_name}_price
+            WHERE code = %s  -- 4桁コードをそのまま使用
+            ORDER BY date DESC
+            LIMIT %s;
+            """
+            
+            # SQLクエリの内容を確認
+            formatted_query = self.cur.mogrify(query, (code, limit)).decode('utf-8')
+            self.logger.debug(f"実行SQL: {formatted_query}")
+            
+            self.cur.execute(query, (code, limit))  # 4桁コードをそのまま使用
+            rows = self.cur.fetchall()
+            
+            self.logger.debug(f"取得した行数: {len(rows)}")
+            
+            return [
+                {
+                    'date': row[0].strftime('%Y%m%d'),
+                    'open': float(row[1]),
+                    'high': float(row[2]),
+                    'low': float(row[3]),
+                    'close': float(row[4]),
+                    'volume': int(row[5])
+                }
+                for row in rows
+            ]
+            
+        except Exception as e:
+            self.logger.error(f"株価データ取得エラー（コード: {code}）: {str(e)}")
+            return []
+
+    def insert_indicators(self, code: str, industry_name: str, indicators: List[Dict]) -> bool:
+        """
+        計算したインジケーターをDBに保存
+        
+        Args:
+            code (str): 銘柄コード（4桁）
+            industry_name (str): 業種名のテーブルプレフィックス
+            indicators (List[Dict]): インジケーターのリスト
+            
+        Returns:
+            bool: 保存成功でTrue
+        """
+        try:
+            query = f"""
+            INSERT INTO {industry_name}_indicator (
+                code, date, ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a,
+                ichimoku_senkou_b, adx, bb_lower, bb_middle, bb_upper,
+                stoch_k, stoch_d, atr, rsi, macd,
+                dynamic_threshold, weekly_trend, pca_signal
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            ON CONFLICT (code, date) DO UPDATE SET
+                ichimoku_tenkan = EXCLUDED.ichimoku_tenkan,
+                ichimoku_kijun = EXCLUDED.ichimoku_kijun,
+                ichimoku_senkou_a = EXCLUDED.ichimoku_senkou_a,
+                ichimoku_senkou_b = EXCLUDED.ichimoku_senkou_b,
+                adx = EXCLUDED.adx,
+                bb_lower = EXCLUDED.bb_lower,
+                bb_middle = EXCLUDED.bb_middle,
+                bb_upper = EXCLUDED.bb_upper,
+                stoch_k = EXCLUDED.stoch_k,
+                stoch_d = EXCLUDED.stoch_d,
+                atr = EXCLUDED.atr,
+                rsi = EXCLUDED.rsi,
+                macd = EXCLUDED.macd,
+                dynamic_threshold = EXCLUDED.dynamic_threshold,
+                weekly_trend = EXCLUDED.weekly_trend,
+                pca_signal = EXCLUDED.pca_signal;
+            """
+            
+            for indicator in indicators:
+                values = (
+                    code,  # 4桁コードをそのまま使用
+                    indicator['date'],
+                    indicator['ichimoku_tenkan'],
+                    indicator['ichimoku_kijun'],
+                    indicator['ichimoku_senkou_a'],
+                    indicator['ichimoku_senkou_b'],
+                    indicator['adx'],
+                    indicator['bb_lower'],
+                    indicator['bb_middle'],
+                    indicator['bb_upper'],
+                    indicator['stoch_k'],
+                    indicator['stoch_d'],
+                    indicator['atr'],
+                    indicator['rsi'],
+                    indicator['macd'],
+                    indicator['dynamic_threshold'],
+                    indicator['weekly_trend'],
+                    indicator['pca_signal']
+                )
+                # クエリ内容を確認
+                formatted_query = self.cur.mogrify(query, values).decode('utf-8')
+                self.logger.debug(f"実行SQL: {formatted_query}")
+                
+                self.cur.execute(query, values)
+            
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"インジケーター保存エラー（コード: {code}）: {str(e)}")
+            self.conn.rollback()
+            return False 

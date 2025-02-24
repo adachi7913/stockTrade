@@ -33,15 +33,19 @@ class TableCategory(Enum):
     def get_table_prefix(cls, japanese_value: str) -> str:
         """
         指定された日本語のカテゴリー名に対応する英語のテーブル接頭辞を返す
-
-        :param japanese_value: 日本語のカテゴリー名 (例: "小売")
-        :return: 英語のテーブル接頭辞 (例: "retail")
-        :raises ValueError: 未知のカテゴリーの場合
         """
+        japanese_value = japanese_value.strip()
+        # print(f"変換対象の業種名: '{japanese_value}'")  # デバッグ用
+        
+        # 全カテゴリーとの比較を表示
         for category in cls:
+            # print(f"比較: '{category.japanese}' == '{japanese_value}' -> {category.japanese == japanese_value}")
             if category.japanese == japanese_value:
                 return category.english
-        raise ValueError(f"未知のカテゴリー: {japanese_value}")
+        
+        # マッチしなかった場合、全カテゴリーを表示
+        available_categories = [f"'{c.japanese}'" for c in cls]
+        raise ValueError(f"未知のカテゴリー: '{japanese_value}'\n利用可能なカテゴリー: {available_categories}")
 
 if __name__ == "__main__":
     # テスト用の日本語カテゴリー一覧

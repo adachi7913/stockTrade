@@ -27,6 +27,11 @@ def setup_logging(log_type):
     ch = logging.StreamHandler()
     ch.setFormatter(formatter)
     logger.addHandler(ch)
+
+    # tachibana_stock_api_base のロガーレベルを WARNING に設定
+    api_logger = logging.getLogger('lib.tachibana_stock_api_base')
+    # api_logger.setLevel(logging.WARNING)  # DEBUGやINFOレベルのログを抑制
+
     return logger
 
 def cleanup_old_logs(log_type):
@@ -43,8 +48,8 @@ def main():
 
     # コマンドライン引数から開始コードを取得
     start_code = sys.argv[1] if len(sys.argv) > 1 else None
-    if start_code is None:
-        start_code = "9880"
+    # if start_code is None:
+    #     start_code = "9880"
     try:
         api = TachibanaStockAPI()
         api.execute_stock_price_retrieval(start_code)
@@ -52,5 +57,17 @@ def main():
         logger.error(f"株価データ取得処理でエラーが発生しました: {str(e)}")
         sys.exit(1)
 
+def test_single_stock():
+    """1銘柄のみを処理してインジケーター計算をテスト"""
+    logger = setup_logging("tachibana")  # 既存のロギング設定を使用
+    cleanup_old_logs("tachibana")
+    
+    try:
+        api = TachibanaStockAPI(num_threads=1)
+        api.execute_stock_price_retrieval(start_code="1301")  # 極洋を対象にテスト
+    except Exception as e:
+        logger.error(f"テスト実行中にエラーが発生しました: {str(e)}")
+        sys.exit(1)
+
 if __name__ == "__main__":
-    main()
+    test_single_stock()
