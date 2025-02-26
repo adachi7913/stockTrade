@@ -495,7 +495,7 @@ class StockRepository(BaseRepository):
                 rule_top_price, rule_period, risk_reward, no_entry_span, update_when, entry_score, expected_return, reason
             ) VALUES (
                 %(date)s, %(code)s, %(close)s, %(rule_entry_price)s, %(rule_stop_limit)s,
-                %(rule_top_price)s, %(rule_period)s, %(riskReward)s, %(no_entry_span)s, NOW(), %(entry_score)s, %(expected_return)s, %(reason)s
+                %(rule_top_price)s, %(rule_period)s, %(risk_reward)s, %(no_entry_span)s, NOW(), %(entry_score)s, %(expected_return)s, %(reason)s
             )
             ON CONFLICT (code) DO UPDATE SET
                 date = EXCLUDED.date,

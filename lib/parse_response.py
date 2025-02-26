@@ -35,7 +35,7 @@ def validate_response_data(data):
         'rule_stop_limit': (str, int, float),   # 数値型も許容
         'rule_top_price': (str, int, float),    # 数値型も許容
         'rule_period': str,
-        'riskReward': (str, int, float),        # 数値型も許容
+        'risk_reward': (str, int, float),        # 数値型も許容
         'no_entry_span': int
     }
     
@@ -47,7 +47,7 @@ def validate_response_data(data):
         value = data[field]
         if not isinstance(value, expected_type):
             try:
-                if field in ['rule_entry_price', 'rule_stop_limit', 'rule_top_price', 'riskReward']:
+                if field in ['rule_entry_price', 'rule_stop_limit', 'rule_top_price', 'risk_reward']:
                     # 数値型の場合は文字列に変換
                     if isinstance(value, (int, float, Decimal)):
                         data[field] = str(value)
@@ -97,10 +97,10 @@ def parse_response(full_data, response):
         
         # 数値型の場合は文字列に変換する処理を追加
         rule_entry_price = str(rule.get("entryPrice", "NG"))
-        rule_stop_limit = str(rule.get("sl", "NG"))
-        rule_top_price = str(rule.get("tp", "NG"))
+        rule_stop_limit = str(rule.get("stop_loss", rule.get("sl", "NG")))  # stop_lossとslの両方に対応
+        rule_top_price = str(rule.get("target_price", rule.get("tp", "NG")))  # target_priceとtpの両方に対応
         rule_period = str(rule.get("period", "NG"))
-        risk_reward = str(rule.get("riskReward", "NG"))
+        risk_reward = str(rule.get("risk_reward", rule.get("riskReward", "NG")))  # risk_rewardとriskRewardの両方に対応
         
         # 想定リターンの計算（利確目標 - エントリー価格）
         try:
@@ -123,7 +123,7 @@ def parse_response(full_data, response):
             "rule_stop_limit": rule_stop_limit,
             "rule_top_price": rule_top_price,
             "rule_period": rule_period,
-            "riskReward": risk_reward,
+            "risk_reward": risk_reward,
             "no_entry_span": response_data.get("no_entry_span", 0),
             "entry_score": entry_score,
             "expected_return": expected_return,
