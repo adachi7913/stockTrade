@@ -862,6 +862,10 @@ class TachibanaStockAPI:
             
             # 日足株価部分をリスト型で抜き出す
             price_history = dic_return.get('aCLMMfdsMarketPriceHistory')
+            
+            # 成功フラグを初期化
+            success = False
+            
             if price_history:
                 self.logger.debug(f"取得した価格履歴数: {len(price_history)}")
                 if self.execution_mode == 'daily':
@@ -895,11 +899,12 @@ class TachibanaStockAPI:
                         self.logger.debug(f"保存するデータ: {price_data}")
                         
                         # DBに保存（industry_nameと4桁コードを使用）
-                        success = self.repo.insert_stock_price_data(price_data, industry_name)
-                        if not success:
+                        current_success = self.repo.insert_stock_price_data(price_data, industry_name)
+                        if not current_success:
                             self.logger.warning(f"日付 {formatted_date} のデータ保存に失敗しました")
                         else:
                             self.logger.debug(f"日付 {formatted_date} のデータを保存しました")
+                            success = True  # 少なくとも1件のデータが保存できれば成功とみなす
                         
                     except Exception as e:
                         self.logger.error(f"データ保存中にエラーが発生しました: {str(e)}")
@@ -1051,9 +1056,9 @@ class TachibanaStockAPI:
                     # 最新のインジケーター値をログ出力
                     latest = indicators[-1]
                     self.logger.info(f"最新のインジケーター値（{latest['date']}）:")
-                    self.logger.info(f"  一目均衡表: 転換線={latest['ichimoku_tenkan']:.2f}, 基準線={latest['ichimoku_kijun']:.2f}")
-                    self.logger.info(f"  ボリンジャーバンド: 上限={latest['bb_upper']:.2f}, 中央={latest['bb_middle']:.2f}, 下限={latest['bb_lower']:.2f}")
-                    self.logger.info(f"  RSI: {latest['rsi']:.2f}, MACD: {latest['macd']:.2f}")
+                    self.logger.info(f"  一目均衡表: 転換線={format(latest['ichimoku_tenkan'], '.2f') if latest['ichimoku_tenkan'] is not None else 'None'}, 基準線={format(latest['ichimoku_kijun'], '.2f') if latest['ichimoku_kijun'] is not None else 'None'}")
+                    self.logger.info(f"  ボリンジャーバンド: 上限={format(latest['bb_upper'], '.2f') if latest['bb_upper'] is not None else 'None'}, 中央={format(latest['bb_middle'], '.2f') if latest['bb_middle'] is not None else 'None'}, 下限={format(latest['bb_lower'], '.2f') if latest['bb_lower'] is not None else 'None'}")
+                    self.logger.info(f"  RSI: {format(latest['rsi'], '.2f') if latest['rsi'] is not None else 'None'}, MACD: {format(latest['macd'], '.2f') if latest['macd'] is not None else 'None'}")
                 return success
             
             self.logger.warning(f"銘柄コード {code} のインジケーター計算結果が空です")

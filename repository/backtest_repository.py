@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from repository.base_repository import BaseRepository
 from repository.stock_repository import StockRepository
 import logging
+from sqlalchemy import create_engine
+import urllib.parse
 
 load_dotenv()
 
@@ -13,6 +15,35 @@ class BacktestRepository(BaseRepository):
         super().__init__()
         self.stock_repository = StockRepository()
         self.logger = logging.getLogger(__name__)
+        # SQLAlchemyエンジンを初期化
+        self.engine = self._create_sqlalchemy_engine()
+
+    def _create_sqlalchemy_engine(self):
+        """
+        SQLAlchemyエンジンを作成します
+        
+        Returns:
+            sqlalchemy.engine.Engine: SQLAlchemyエンジンオブジェクト
+        """
+        try:
+            # 環境変数から接続情報を取得
+            host = os.getenv("DB_HOST", "localhost")
+            port = os.getenv("DB_PORT", "5432")
+            database = os.getenv("DB_NAME", "stock_trade")
+            user = os.getenv("DB_USER", "postgres")
+            password = os.getenv("DB_PASSWORD", "postgres")
+            
+            # パスワードをURLエンコード
+            encoded_password = urllib.parse.quote_plus(password)
+            
+            # PostgreSQL接続文字列を作成
+            connection_string = f"postgresql://{user}:{encoded_password}@{host}:{port}/{database}"
+            
+            # エンジンを作成して返す
+            return create_engine(connection_string)
+        except Exception as e:
+            self.logger.error(f"SQLAlchemyエンジン作成エラー: {e}")
+            raise
 
     def fetch_historical_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
@@ -41,7 +72,12 @@ class BacktestRepository(BaseRepository):
                 ORDER BY date ASC;
             """.format(industry_name)
 
-            df = pd.read_sql(query, self.conn, params=(symbol, start_date, end_date))
+            # SQLAlchemyエンジンを使用してデータを取得
+            df = pd.read_sql_query(
+                sql=query, 
+                con=self.engine, 
+                params=(symbol, start_date, end_date)
+            )
             return df
 
         except Exception as e:
@@ -55,3 +91,6 @@ class BacktestRepository(BaseRepository):
         super().close()
         if hasattr(self, 'stock_repository'):
             self.stock_repository.close()
+        # SQLAlchemyエンジンの接続をクローズ
+        if hasattr(self, 'engine'):
+            self.engine.dispose()

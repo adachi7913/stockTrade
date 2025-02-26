@@ -23,6 +23,9 @@ class IndicatorCalculator:
                 - close: 終値
                 - volume: 出来高
         """
+        # ロガーの初期化
+        self.logger = logging.getLogger(__name__)
+        
         self.validate_input_data(data)
         self.df = pd.DataFrame(data)
         self.df['date'] = pd.to_datetime(self.df['date'])
@@ -415,12 +418,65 @@ class IndicatorCalculator:
         return float(senkou_b_series.iloc[-1]) if not pd.isna(senkou_b_series.iloc[-1]) else 0
 
     def _calculate_dynamic_threshold(self, data):
-        """動的閾値を計算"""
-        atr = self._calculate_atr(data)
-        close = data['close'].iloc[-1]
-        atr_ratio = (atr / close) * 100
-        base_threshold = 5.0
-        return base_threshold * (atr_ratio / base_threshold)
+        """動的閾値を計算（異常値は前後の値から推測）"""
+        try:
+            atr = self._calculate_atr(data)
+            close = data['close'].iloc[-1]
+            
+            # 異常値チェック
+            if close <= 0 or pd.isna(close) or pd.isna(atr):
+                # 前後の正常データから推測値を算出
+                window_size = 5  # 前後5日分のデータを使用
+                
+                # closeが0または異常値の場合
+                if close <= 0 or pd.isna(close):
+                    # 直近の正常なclose値を取得
+                    valid_closes = data['close'][data['close'] > 0].dropna()
+                    if len(valid_closes) >= 2:
+                        # 直近の変動率を計算
+                        close_changes = valid_closes.pct_change()
+                        avg_change = close_changes.tail(window_size).mean()
+                        # 最後の正常値から推測値を計算
+                        close = valid_closes.iloc[-1] * (1 + avg_change)
+                        self.logger.debug(f"closeの推測値を計算: {close:.2f}")
+                    else:
+                        self.logger.warning("十分な正常データがないため、推測値を計算できません")
+                        return 0.0
+                
+                # ATRが異常値の場合
+                if pd.isna(atr):
+                    # 直近の正常なATR値を取得
+                    valid_atrs = []
+                    for i in range(len(data) - window_size, len(data)):
+                        if i >= 0:
+                            window_data = data.iloc[max(0, i-13):i+1]  # ATRの計算に14日分必要
+                            temp_atr = self._calculate_atr(window_data)
+                            if not pd.isna(temp_atr) and temp_atr > 0:
+                                valid_atrs.append(temp_atr)
+                    
+                    if valid_atrs:
+                        # 直近の正常なATR値の平均を使用
+                        atr = np.mean(valid_atrs)
+                        self.logger.debug(f"ATRの推測値を計算: {atr:.2f}")
+                    else:
+                        self.logger.warning("十分な正常データがないため、推測値を計算できません")
+                        return 0.0
+            
+            # 動的閾値の計算
+            atr_ratio = (atr / close) * 100
+            base_threshold = 5.0
+            dynamic_threshold = base_threshold * (atr_ratio / base_threshold)
+            
+            # 計算結果の妥当性チェック
+            if pd.isna(dynamic_threshold) or np.isinf(dynamic_threshold):
+                self.logger.warning(f"動的閾値の計算結果が無効です: {dynamic_threshold}")
+                return 0.0
+            
+            return dynamic_threshold
+            
+        except Exception as e:
+            self.logger.error(f"動的閾値計算エラー: {str(e)}")
+            return 0.0
 
     def _calculate_weekly_trend(self, data):
         """週別トレンドを計算"""
