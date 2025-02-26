@@ -95,7 +95,10 @@ def run_ai_rule_generation(start_code=None):
                 backtest_results = []
                 try:
                     # 銘柄コードから末尾の0を除去（yFinance API用）
-                    yfinance_code = validated_code.rstrip('0')
+                    # 5桁の場合のみ末尾の0を除去し、4桁以下の場合はそのまま使用
+                    yfinance_code = validated_code
+                    if len(validated_code) == 5 and validated_code.endswith('0'):
+                        yfinance_code = validated_code[:-1]
                     backtest_results = run_multiple_backtests(yfinance_code)
                     logging.info(f"{stock_code}: バックテスト実行完了 - {len(backtest_results)}件の結果を取得")
                 except Exception as e:

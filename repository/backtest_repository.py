@@ -59,7 +59,12 @@ class BacktestRepository(BaseRepository):
         """
         try:
             # 業種名のプレフィックスを取得
-            industry_name = self.stock_repository.fetch_industry_name_prefix(symbol + "0")
+            # 4桁の場合のみ末尾に0を追加
+            companies_code = symbol
+            if len(symbol) == 4:
+                companies_code = symbol + "0"
+            
+            industry_name = self.stock_repository.fetch_industry_name_prefix(companies_code)
             if not industry_name:
                 self.logger.error(f"業種名が取得できません: {symbol}")
                 return pd.DataFrame()
