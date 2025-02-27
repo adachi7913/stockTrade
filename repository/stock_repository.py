@@ -13,6 +13,14 @@ import logging
 DDL_LOCK = threading.Lock()
 
 class StockRepository(BaseRepository):
+    def __init__(self):
+        """
+        株価データリポジトリクラスの初期化
+        """
+        super().__init__()
+        # 業種名キャッシュの初期化
+        self.industry_name_cache = {}
+        
     def insert_company_data(self, company_data: Dict) -> bool:
         """企業情報をデータベースに挿入または更新します"""
         try:
@@ -478,6 +486,114 @@ class StockRepository(BaseRepository):
             self.conn.rollback()
             return False
 
+    def bulk_insert_indicator_data(self, indicators_batch: List[Dict], industry_name: str) -> bool:
+        """
+        複数の指標データを一括で挿入します
+        
+        Args:
+            indicators_batch (List[Dict]): 挿入する指標データのリスト。各要素は以下の形式:
+                {
+                    'code': 証券コード,
+                    'indicators': インジケーターデータのリスト
+                }
+            industry_name (str): 業種名
+            
+        Returns:
+            bool: 挿入成功でTrue
+        """
+        if not indicators_batch:
+            return True
+            
+        table_name = f"{industry_name}_indicator"
+        try:
+            # 安全に丸めるヘルパー関数
+            def safe_round(value, ndigits=2):
+                try:
+                    if isinstance(value, (int, float)) and not np.isnan(value):
+                        return round(value, ndigits)
+                    return 0
+                except Exception:
+                    return 0
+                    
+            upsert_query = f"""
+            INSERT INTO {table_name} (
+                code, date, ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a, ichimoku_senkou_b,
+                adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr, rsi, macd,
+                dynamic_threshold, weekly_trend, pca_signal
+            ) VALUES (
+                %(code)s, %(date)s, %(ichimoku_tenkan)s, %(ichimoku_kijun)s, 
+                %(ichimoku_senkou_a)s, %(ichimoku_senkou_b)s, %(adx)s,
+                %(bb_lower)s, %(bb_middle)s, %(bb_upper)s,
+                %(stoch_k)s, %(stoch_d)s, %(atr)s, %(rsi)s, %(macd)s,
+                %(dynamic_threshold)s, %(weekly_trend)s, %(pca_signal)s
+            )
+            ON CONFLICT (code, date) DO UPDATE SET
+                ichimoku_tenkan = EXCLUDED.ichimoku_tenkan,
+                ichimoku_kijun = EXCLUDED.ichimoku_kijun,
+                ichimoku_senkou_a = EXCLUDED.ichimoku_senkou_a,
+                ichimoku_senkou_b = EXCLUDED.ichimoku_senkou_b,
+                adx = EXCLUDED.adx,
+                bb_lower = EXCLUDED.bb_lower,
+                bb_middle = EXCLUDED.bb_middle,
+                bb_upper = EXCLUDED.bb_upper,
+                stoch_k = EXCLUDED.stoch_k,
+                stoch_d = EXCLUDED.stoch_d,
+                atr = EXCLUDED.atr,
+                rsi = EXCLUDED.rsi,
+                macd = EXCLUDED.macd,
+                dynamic_threshold = EXCLUDED.dynamic_threshold,
+                weekly_trend = EXCLUDED.weekly_trend,
+                pca_signal = EXCLUDED.pca_signal;
+            """
+            
+            # バッチ処理用のパラメータリストを作成
+            params_list = []
+            
+            for batch_item in indicators_batch:
+                code = batch_item['code']
+                indicators = batch_item['indicators']
+                
+                if not indicators:
+                    continue
+                    
+                for data in indicators:
+                    params = {
+                        'code': code,
+                        'date': data.get('date'),
+                        'ichimoku_tenkan': safe_round(data.get('ichimoku_tenkan', 0)),
+                        'ichimoku_kijun': safe_round(data.get('ichimoku_kijun', 0)),
+                        'ichimoku_senkou_a': safe_round(data.get('ichimoku_senkou_a', 0)),
+                        'ichimoku_senkou_b': safe_round(data.get('ichimoku_senkou_b', 0)),
+                        'adx': safe_round(data.get('adx', 0)),
+                        'bb_lower': safe_round(data.get('bb_lower', 0)),
+                        'bb_middle': safe_round(data.get('bb_middle', 0)),
+                        'bb_upper': safe_round(data.get('bb_upper', 0)),
+                        'stoch_k': safe_round(data.get('stoch_k', 0)),
+                        'stoch_d': safe_round(data.get('stoch_d', 0)),
+                        'atr': safe_round(data.get('atr', 0)),
+                        'rsi': safe_round(data.get('rsi', 0)),
+                        'macd': safe_round(data.get('macd', 0)),
+                        'dynamic_threshold': data.get('dynamic_threshold', None),
+                        'weekly_trend': data.get('weekly_trend', None),
+                        'pca_signal': data.get('pca_signal', None)
+                    }
+                    params_list.append(params)
+            
+            # バルクインサートの実行
+            if params_list:
+                self.cur.executemany(upsert_query, params_list)
+                self.conn.commit()
+                self.logger.info(f"{len(params_list)}件のインジケーターデータを一括挿入しました")
+                return True
+            else:
+                self.logger.warning("挿入するデータがありません")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"インジケーターデータ一括挿入エラー: {e}")
+            self.conn.rollback()
+            return False
+
     def insert_api_response(self, response_data: Dict) -> bool:
         """
         API応答データをデータベースに挿入します
@@ -524,7 +640,12 @@ class StockRepository(BaseRepository):
     def fetch_industry_name_prefix(self, code: str) -> Optional[str]:
         """
         指定された証券コードの業種名のテーブルプレフィックスを取得します
+        キャッシュを利用して重複DB接続を削減します
         """
+        # キャッシュにあればそれを返す
+        if code in self.industry_name_cache:
+            return self.industry_name_cache[code]
+            
         try:
             query = """
             SELECT industry_name, code, date
@@ -557,6 +678,10 @@ class StockRepository(BaseRepository):
                     
                     table_prefix = TableCategory.get_table_prefix(industry_name)
                     self.logger.debug(f"変換後のテーブル接頭辞: {table_prefix}")
+                    
+                    # キャッシュに保存
+                    self.industry_name_cache[code] = table_prefix
+                    
                     return table_prefix
                 except ValueError as e:
                     self.logger.error(f"業種名の変換に失敗: {str(e)}")
@@ -568,6 +693,45 @@ class StockRepository(BaseRepository):
         except Exception as e:
             self.logger.error(f"業種名取得エラー（コード: {code}）: {e}")
             return None
+            
+    def preload_industry_names(self, codes: List[str]) -> None:
+        """
+        複数の証券コードの業種名を一括で事前ロードしてキャッシュに保存します
+        
+        Args:
+            codes (List[str]): 証券コードのリスト
+        """
+        if not codes:
+            return
+            
+        try:
+            # コードのリストをカンマ区切りの文字列に変換
+            code_list = "','".join(codes)
+            
+            query = f"""
+            SELECT code, industry_name
+            FROM companies
+            WHERE code IN ('{code_list}')
+            ORDER BY date DESC;
+            """
+            
+            self.cur.execute(query)
+            results = self.cur.fetchall()
+            
+            # 結果をキャッシュに保存
+            for code, industry_name in results:
+                try:
+                    industry_name = industry_name.strip()
+                    table_prefix = TableCategory.get_table_prefix(industry_name)
+                    self.industry_name_cache[code] = table_prefix
+                except ValueError as e:
+                    self.logger.error(f"業種名の変換に失敗: {str(e)}")
+                    continue
+                    
+            self.logger.info(f"{len(self.industry_name_cache)}件の業種名をキャッシュにロードしました")
+            
+        except Exception as e:
+            self.logger.error(f"業種名の一括ロードエラー: {e}")
 
     def fetch_stock_prices(self, code: str, industry_name: str, limit: int = 100) -> List[Dict]:
         """
