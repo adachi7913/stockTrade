@@ -10,3 +10,4 @@ log/
 .specstory/history/
 pandas-ta/
 price_csv/
+*prompt.txt
