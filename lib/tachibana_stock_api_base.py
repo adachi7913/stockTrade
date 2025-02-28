@@ -1043,22 +1043,29 @@ class TachibanaStockAPI:
             # 日付でソート（古い順）
             price_data = sorted(price_data, key=lambda x: x['date'])
             
-            # インジケーター計算
-            calculator = IndicatorCalculator(price_data)
-            indicators = calculator.get_indicators()
+            # インジケーター計算（デイリー処理用の軽量版）
+            from service.indicator_service import IndicatorService
+            indicator_service = IndicatorService(self.repo)
             
-            if indicators:
-                self.logger.info(f"銘柄コード {code} のインジケーター計算が完了しました（結果件数: {len(indicators)}件）")
-                # インジケーターをDBに保存
-                success = self.repo.insert_indicators(code, industry_name, indicators)
-                if success:
-                    self.logger.info(f"銘柄コード {code} のインジケーター計算・保存が完了しました")
-                    # 最新のインジケーター値をログ出力
-                    latest = indicators[-1]
-                    self.logger.info(f"最新のインジケーター値（{latest['date']}）:")
-                    self.logger.info(f"  一目均衡表: 転換線={format(latest['ichimoku_tenkan'], '.2f') if latest['ichimoku_tenkan'] is not None else 'None'}, 基準線={format(latest['ichimoku_kijun'], '.2f') if latest['ichimoku_kijun'] is not None else 'None'}")
-                    self.logger.info(f"  ボリンジャーバンド: 上限={format(latest['bb_upper'], '.2f') if latest['bb_upper'] is not None else 'None'}, 中央={format(latest['bb_middle'], '.2f') if latest['bb_middle'] is not None else 'None'}, 下限={format(latest['bb_lower'], '.2f') if latest['bb_lower'] is not None else 'None'}")
-                    self.logger.info(f"  RSI: {format(latest['rsi'], '.2f') if latest['rsi'] is not None else 'None'}, MACD: {format(latest['macd'], '.2f') if latest['macd'] is not None else 'None'}")
+            # 直近5日分のインジケーターのみを計算・保存する
+            success = indicator_service.calculate_latest_indicators(price_data, code, industry_name, latest_days=5)
+            
+            if success:
+                self.logger.info(f"銘柄コード {code} のインジケーター計算・保存が完了しました")
+                
+                # 最新のインジケーターの値をログに出力
+                try:
+                    # 最新の1件だけを取得
+                    indicators = self.repo.fetch_latest_indicators(code, industry_name)
+                    if indicators:
+                        latest = indicators[0]  # 最新の1件
+                        self.logger.info(f"最新のインジケーター値（{latest['date']}）:")
+                        self.logger.info(f"  一目均衡表: 転換線={format(latest['ichimoku_tenkan'], '.2f') if latest['ichimoku_tenkan'] is not None else 'None'}, 基準線={format(latest['ichimoku_kijun'], '.2f') if latest['ichimoku_kijun'] is not None else 'None'}")
+                        self.logger.info(f"  ボリンジャーバンド: 上限={format(latest['bb_upper'], '.2f') if latest['bb_upper'] is not None else 'None'}, 中央={format(latest['bb_middle'], '.2f') if latest['bb_middle'] is not None else 'None'}, 下限={format(latest['bb_lower'], '.2f') if latest['bb_lower'] is not None else 'None'}")
+                        self.logger.info(f"  RSI: {format(latest['rsi'], '.2f') if latest['rsi'] is not None else 'None'}, MACD: {format(latest['macd'], '.2f') if latest['macd'] is not None else 'None'}")
+                except Exception as e:
+                    self.logger.error(f"最新インジケーター値の取得エラー: {str(e)}")
+                
                 return success
             
             self.logger.warning(f"銘柄コード {code} のインジケーター計算結果が空です")
@@ -1066,4 +1073,6 @@ class TachibanaStockAPI:
             
         except Exception as e:
             self.logger.error(f"インジケーター計算中にエラーが発生しました: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False

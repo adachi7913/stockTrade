@@ -506,4 +506,156 @@ class EntryJudgmentHandler:
 
         except Exception as e:
             self.logger.error(f"エントリー評価中にエラーが発生: {e}")
-            return None 
+            return None
+
+    def judge_exit_timing(self, code: str, industry_name: str, entry_price: float, 
+                         current_price: float, holding_days: int) -> Dict[str, Any]:
+        """
+        保有銘柄の売却タイミングを判断します
+        
+        Args:
+            code (str): 銘柄コード
+            industry_name (str): 業種名
+            entry_price (float): エントリー価格
+            current_price (float): 現在価格
+            holding_days (int): 保有日数
+            
+        Returns:
+            Dict[str, Any]: 判断結果
+                - should_exit (bool): 売却すべきかどうか
+                - confidence (int): 信頼度（0-100）
+                - reason (str): 判断理由
+                - strategy (str): 推奨戦略
+        """
+        try:
+            self.logger.info(f"銘柄 {code} の売却判断を開始します")
+            
+            # 損益率の計算
+            profit_rate = ((current_price - entry_price) / entry_price) * 100
+            
+            # プロンプトの作成
+            prompt = self._create_exit_prompt(
+                code=code,
+                industry_name=industry_name,
+                entry_price=entry_price,
+                current_price=current_price,
+                profit_rate=profit_rate,
+                holding_days=holding_days
+            )
+            
+            # APIリクエスト
+            response = self._call_gemini_api(prompt)
+            
+            if not response:
+                self.logger.error(f"銘柄 {code} の売却判断でAPIレスポンスの取得に失敗しました")
+                return {
+                    "should_exit": False,
+                    "confidence": 0,
+                    "reason": "APIレスポンスの取得に失敗しました",
+                    "strategy": "保持継続（デフォルト）"
+                }
+                
+            # レスポンスの解析
+            try:
+                result = json.loads(response)
+                self.logger.info(f"銘柄 {code} の売却判断結果: {result}")
+                return result
+                
+            except json.JSONDecodeError:
+                self.logger.error(f"銘柄 {code} の売却判断でJSONパースに失敗しました: {response}")
+                # テキスト応答からの情報抽出を試みる
+                should_exit = "exit" in response.lower() or "sell" in response.lower()
+                reason = self._extract_reason_from_text(response)
+                
+                return {
+                    "should_exit": should_exit,
+                    "confidence": 50,  # デフォルト値
+                    "reason": reason or "JSONパースに失敗しましたが、テキスト分析の結果です",
+                    "strategy": "保持継続（パース失敗時のデフォルト）" if not should_exit else "売却（パース失敗時の判断）"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"銘柄 {code} の売却判断中にエラーが発生しました: {e}")
+            return {
+                "should_exit": False,
+                "confidence": 0,
+                "reason": f"エラーが発生しました: {e}",
+                "strategy": "保持継続（エラー発生時のデフォルト）"
+            }
+            
+    def _create_exit_prompt(self, code: str, industry_name: str, entry_price: float,
+                           current_price: float, profit_rate: float, holding_days: int) -> str:
+        """
+        売却判断用のプロンプトを作成します
+        
+        Args:
+            code (str): 銘柄コード
+            industry_name (str): 業種名
+            entry_price (float): エントリー価格
+            current_price (float): 現在価格
+            profit_rate (float): 損益率（%）
+            holding_days (int): 保有日数
+            
+        Returns:
+            str: 作成されたプロンプト
+        """
+        prompt = f"""
+        あなたは株式投資の専門家です。以下の情報に基づいて、保有中の銘柄を売却すべきかどうかを判断してください。
+
+        【銘柄情報】
+        - 銘柄コード: {code}
+        - 業種: {industry_name}
+        - 購入価格: {entry_price:,.0f}円
+        - 現在価格: {current_price:,.0f}円
+        - 損益率: {profit_rate:.2f}%
+        - 保有日数: {holding_days}日
+
+        【判断基準】
+        以下の要素を考慮して総合的に判断してください：
+        1. 損益状況（利益確定や損切りのタイミング）
+        2. 保有期間（短期・中期・長期の観点）
+        3. 業種の市場動向
+        4. テクニカル指標の状況
+        5. リスク管理の観点
+
+        【出力形式】
+        以下のJSON形式で回答してください：
+        {{
+            "should_exit": true/false,  // 売却すべきかどうか
+            "confidence": 0-100,        // 判断の信頼度（0-100）
+            "reason": "判断理由の詳細な説明",
+            "strategy": "今後の推奨戦略"
+        }}
+
+        JSONのみを出力し、その他の説明は不要です。
+        """
+        return prompt
+        
+    def _extract_reason_from_text(self, text: str) -> Optional[str]:
+        """
+        テキストから理由部分を抽出します
+        
+        Args:
+            text (str): 抽出元のテキスト
+            
+        Returns:
+            Optional[str]: 抽出された理由、見つからない場合はNone
+        """
+        # 理由を示す可能性のあるキーワード
+        reason_keywords = ["理由", "判断", "分析", "考慮", "because", "reason", "analysis"]
+        
+        # テキストを行に分割
+        lines = text.split('\n')
+        
+        # 各行をチェック
+        for line in lines:
+            for keyword in reason_keywords:
+                if keyword in line.lower():
+                    return line.strip()
+                    
+        # 見つからない場合は最初の実質的な行を返す
+        for line in lines:
+            if line.strip() and len(line.strip()) > 10:  # 実質的な内容がある行
+                return line.strip()
+                
+        return None 

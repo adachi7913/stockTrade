@@ -102,8 +102,8 @@ class ApiHandler:
            - 期間による結果の違いから、市場環境の変化を考慮
            - 取引パターンから、成功率の高いエントリー・決済条件を抽出
         4. データ品質の確認と反映
-        5. 信頼性のスコアが700点を超える場合、エントリールール（entryPrice, stop_loss, target_price, period, risk_reward）を出力してください。
-        6. 信頼性のスコアが700点を超えない場合、エントリールール（entryPrice, stop_loss, target_price, period, risk_reward）はNGを出力してください。
+        5. 信頼性のスコアが700点を超える場合、ロングポジションでのエントリールール（entryPrice, stop_loss, target_price, period, risk_reward）を出力してください。
+        6. 信頼性のスコアが700点を超えない場合、ロングポジションでのエントリールール（entryPrice, stop_loss, target_price, period, risk_reward）はNGを出力してください。
 
         【出力形式】（以下のJSON形式を厳守し、その他の内容は含めないでください）
         {{

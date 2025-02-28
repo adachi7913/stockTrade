@@ -192,4 +192,97 @@ class IndicatorService:
                 self.logger.error(f"バルクインサートエラー: industry={industry_name}, error={str(e)}")
                 success = False
                 
-        return success 
+        return success
+        
+    def calculate_latest_indicators(self, stock_data: List[Dict], code: str, industry_name: str, latest_days: int = 5) -> bool:
+        """
+        デイリー処理用の直近期間のインジケーター計算を行います
+        
+        Args:
+            stock_data (List[Dict]): 株価データのリスト
+            code (str): 株価コード
+            industry_name (str): 業種名
+            latest_days (int): 保存する最新のインジケーター日数（デフォルト: 5日）
+            
+        Returns:
+            bool: 保存成功でTrue
+        """
+        try:
+            if not stock_data:
+                self.logger.warning(f"株価データが空のため、インジケーター計算をスキップします: code={code}")
+                return False
+
+            # インジケーター計算に必要な最小データ数をチェック
+            min_required_records = 78  # 一目均衡表の先行B = 52+26日
+            if len(stock_data) < min_required_records:
+                self.logger.warning(f"データ不足のため、インジケーター計算をスキップします: code={code}, データ数={len(stock_data)}, 必要数={min_required_records}")
+                return False
+
+            # 日付でソート（古い順）
+            stock_data = sorted(stock_data, key=lambda x: x['date'])
+            self.logger.info(f"銘柄コード {code} のインジケーター計算（データ期間: {stock_data[0]['date']}～{stock_data[-1]['date']}）")
+
+            # インジケーターを計算
+            calculator = IndicatorCalculator(stock_data)
+            indicators = calculator.calculate_indicators()
+            
+            if not indicators:
+                self.logger.warning(f"インジケーター計算結果が空です: code={code}")
+                return False
+                
+            # 直近の指定日数分のみを保存
+            if len(indicators) > latest_days:
+                indicators_to_save = indicators[-latest_days:]
+                self.logger.info(f"銘柄コード {code} の直近 {latest_days}日分のインジケーターのみを保存します（全期間: {len(indicators)}日）")
+            else:
+                indicators_to_save = indicators
+                self.logger.info(f"銘柄コード {code} の全インジケーターを保存します（全期間: {len(indicators)}日）")
+            
+            # 日付フォーマットの検証と修正
+            validated_indicators = []
+            for indicator in indicators_to_save:
+                # 日付フォーマットチェック
+                date_str = indicator.get('date')
+                if not date_str:
+                    self.logger.warning(f"インジケーターに日付がありません: {indicator}")
+                    continue
+                
+                # 日付フォーマットの検証と修正
+                try:
+                    # 既に正しいフォーマット（YYYY-MM-DD）かチェック
+                    if '-' in date_str and len(date_str.split('-')) == 3:
+                        # 既に正しいフォーマット
+                        pass
+                    # YYYYMMDDの形式かチェック
+                    elif len(date_str) == 8 and date_str.isdigit():
+                        # YYYYMMDDをYYYY-MM-DDに変換
+                        indicator['date'] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                    else:
+                        # その他の場合はエラーログを出力して次へ
+                        self.logger.warning(f"不正な日付フォーマットです: {date_str}")
+                        continue
+                except Exception as e:
+                    self.logger.error(f"日付フォーマット変換エラー: {str(e)}, date={date_str}")
+                    continue
+                
+                validated_indicators.append(indicator)
+            
+            if not validated_indicators:
+                self.logger.warning(f"検証後のインジケーターデータが空です: code={code}")
+                return False
+            
+            self.logger.info(f"日付フォーマット検証後のデータ件数: {len(validated_indicators)}件")
+            
+            # 検証済みデータをDBに保存
+            success = self.stock_repository.insert_indicator_data(validated_indicators, code, industry_name)
+            
+            if success:
+                self.logger.info(f"銘柄コード {code} の直近インジケーター計算・保存が完了しました（保存件数: {len(validated_indicators)}件）")
+            
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"直近インジケーター計算・保存エラー: code={code}, error={str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return False 

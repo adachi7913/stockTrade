@@ -10,6 +10,7 @@ import time
 import gc
 from typing import Dict, List, Any, Optional, Union, Tuple
 import traceback
+from datetime import datetime  # datetimeクラスをインポート
 
 
 class IndicatorCalculator:
@@ -186,7 +187,27 @@ class IndicatorCalculator:
             # 結果をリストとして整形
             result = []
             for idx in range(len(self.df)):
-                date_str = self.df.index[idx].strftime('%Y-%m-%d') if isinstance(self.df.index[idx], pd.Timestamp) else str(self.df.index[idx])
+                # 元のデータフレームから正しい日付を取得
+                date_obj = self.df.iloc[idx]['date']
+                
+                # 日付のフォーマットを確保
+                if isinstance(date_obj, pd.Timestamp) or isinstance(date_obj, datetime):
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                elif isinstance(date_obj, str):
+                    # 既に文字列の場合はフォーマットを確認
+                    try:
+                        # YYYYMMDDの場合はハイフン付きに変換
+                        if len(date_obj) == 8 and date_obj.isdigit():
+                            date_str = f"{date_obj[:4]}-{date_obj[4:6]}-{date_obj[6:8]}"
+                        else:
+                            date_str = date_obj  # 既にフォーマット済みとして使用
+                    except Exception:
+                        date_str = date_obj  # 変換できない場合は元の値を使用
+                else:
+                    # どうしても日付が取得できない場合は現在日付を使用
+                    import datetime as dt
+                    date_str = dt.datetime.now().strftime('%Y-%m-%d')
+                    logging.warning(f"日付の取得に失敗しました（インデックス: {idx}）。現在日付を使用します: {date_str}")
                 
                 # 基本データの取得
                 record = {
@@ -311,34 +332,84 @@ class IndicatorCalculator:
                     # pandas_ta の結果に0が多い場合は手動計算を使う
                     zero_count = (pandas_ta_k == 0).sum()
                     if zero_count > len(pandas_ta_k) * 0.3:  # 30%以上が0の場合
-                        logging.warning(f"pandas_ta のストキャスティクス計算で0が多すぎます（{zero_count}/{len(pandas_ta_k)}）。手動計算を使用します。")
-                        self._cache['stoch_k'] = manual_k
+                        self.logger.warning(f"pandas_ta のストキャスティクス計算で0が多すぎます（{zero_count}/{len(pandas_ta_k)}）。手動計算を使用します。")
+                        stoch_k = manual_k
                     else:
-                        self._cache['stoch_k'] = pandas_ta_k
+                        stoch_k = pandas_ta_k
                 else:
                     # pandas_ta の結果がなければ手動計算を使う
-                    logging.warning("pandas_ta でストキャスティクス計算に失敗しました。手動計算を使用します。")
-                    self._cache['stoch_k'] = manual_k
+                    self.logger.warning("pandas_ta でストキャスティクス計算に失敗しました。手動計算を使用します。")
+                    stoch_k = manual_k
                 
-                if "STOCHd_14_3_3" in stoch_df.columns:
-                    self._cache['stoch_d'] = stoch_df["STOCHd_14_3_3"]
-                else:
-                    # %D は %K の3日移動平均
-                    self._cache['stoch_d'] = manual_k.rolling(window=3).mean().fillna(50)
+                # %Dの計算（%Kの3日移動平均）
+                stoch_d = stoch_k.rolling(window=3).mean().fillna(50)
+                
+                # データ長の調整（不足分を50で埋める）
+                required_length = len(self.df)
+                if len(stoch_k) < required_length:
+                    missing_count = required_length - len(stoch_k)
+                    # ストキャスティクスは最初の17日間分(14日間ウィンドウ+3日間移動平均)は計算できないため、
+                    # 先頭部分のデータ不足は正常。異常な欠落がある場合のみログ出力
+                    expected_missing = 17  # 理論上の不足データ数
+                    if missing_count > expected_missing + 5:  # 許容範囲を超える場合のみログ出力
+                        self.logger.warning(f"ストキャスティクスKの長さが不足しています: {len(stoch_k)}/{required_length}, 許容範囲を超える不足データが検出されました")
+                    
+                    # append() はpandas 2.0で削除されたため、pd.concatを使用
+                    padding = pd.Series([50.0] * missing_count)
+                    stoch_k = pd.concat([padding, stoch_k]).reset_index(drop=True)
+                
+                if len(stoch_d) < required_length:
+                    missing_count = required_length - len(stoch_d)
+                    # 同様に、異常な欠落がある場合のみログ出力
+                    expected_missing = 17  # 理論上の不足データ数
+                    if missing_count > expected_missing + 5:  # 許容範囲を超える場合のみログ出力
+                        self.logger.warning(f"ストキャスティクスDの長さが不足しています: {len(stoch_d)}/{required_length}, 許容範囲を超える不足データが検出されました")
+                    
+                    # append() はpandas 2.0で削除されたため、pd.concatを使用
+                    padding = pd.Series([50.0] * missing_count)
+                    stoch_d = pd.concat([padding, stoch_d]).reset_index(drop=True)
+                
+                # キャッシュに保存
+                self._cache['stoch_k'] = stoch_k
+                self._cache['stoch_d'] = stoch_d
             
             except Exception as e:
-                logging.error(f"ストキャスティクスの手動計算でエラー: {e}")
+                self.logger.error(f"ストキャスティクスの手動計算でエラー: {str(e)}")
                 # エラー時はデフォルト値としてpandas_taの結果を使用（あれば）
                 if "STOCHk_14_3_3" in stoch_df.columns:
-                    self._cache['stoch_k'] = stoch_df["STOCHk_14_3_3"]
+                    stoch_k = stoch_df["STOCHk_14_3_3"]
                 else:
                     # 最終的なフォールバック
-                    self._cache['stoch_k'] = pd.Series(50, index=self.df.index)
+                    stoch_k = pd.Series(50, index=self.df.index)
                     
                 if "STOCHd_14_3_3" in stoch_df.columns:
-                    self._cache['stoch_d'] = stoch_df["STOCHd_14_3_3"]
+                    stoch_d = stoch_df["STOCHd_14_3_3"]
                 else:
-                    self._cache['stoch_d'] = pd.Series(50, index=self.df.index)
+                    stoch_d = pd.Series(50, index=self.df.index)
+                
+                # データ長の調整（不足分を50で埋める）
+                required_length = len(self.df)
+                if len(stoch_k) < required_length:
+                    missing_count = required_length - len(stoch_k)
+                    expected_missing = 17  # 理論上の不足データ数
+                    if missing_count > expected_missing + 5:  # 許容範囲を超える場合のみログ出力
+                        self.logger.warning(f"ストキャスティクスKの長さが不足しています: {len(stoch_k)}/{required_length}, 許容範囲を超える不足データが検出されました")
+                    
+                    padding = pd.Series([50.0] * missing_count)
+                    stoch_k = pd.concat([padding, stoch_k]).reset_index(drop=True)
+                
+                if len(stoch_d) < required_length:
+                    missing_count = required_length - len(stoch_d)
+                    expected_missing = 17  # 理論上の不足データ数
+                    if missing_count > expected_missing + 5:  # 許容範囲を超える場合のみログ出力
+                        self.logger.warning(f"ストキャスティクスDの長さが不足しています: {len(stoch_d)}/{required_length}, 許容範囲を超える不足データが検出されました")
+                    
+                    padding = pd.Series([50.0] * missing_count)
+                    stoch_d = pd.concat([padding, stoch_d]).reset_index(drop=True)
+                
+                # キャッシュに保存
+                self._cache['stoch_k'] = stoch_k
+                self._cache['stoch_d'] = stoch_d
             
             # ATRの計算
             df_atr = self.df.copy()
@@ -445,6 +516,19 @@ class IndicatorCalculator:
                 }
                 return default_values.get(key, 0)
             
+            # インデックスが範囲外かチェック
+            if idx >= len(series):
+                self.logger.debug(f"インデックス範囲外: {key}[{idx}], キャッシュサイズ={len(series)}, デフォルト値を使用")
+                # 各指標のデフォルト値を設定
+                default_values = {
+                    'stoch_k': 50,
+                    'stoch_d': 50,
+                    'rsi': 50,
+                    'adx': 25,
+                    'pca_signal': 0
+                }
+                return default_values.get(key, 0)
+            
             value = series.iloc[idx]
             
             # NaN、無限大をチェック
@@ -467,13 +551,14 @@ class IndicatorCalculator:
                     window_low = min(self.df['low'].iloc[idx-14:idx+1])
                     # 高値と安値が同じなら50を返す（中立）
                     if window_high == window_low:
-                        logging.debug(f"{key}が0で、14日間の高値と安値が同じです。50を返します。")
+                        self.logger.debug(f"{key}が0で、14日間の高値と安値が同じです。50を返します。")
                         return 50
                 
             return float(value)
             
         except Exception as e:
-            logging.warning(f"_get_cached_valueでエラー({key}, {idx}): {e}")
+            # エラーのアウトプットをデバッグレベルに変更（大量の警告を減らす）
+            self.logger.debug(f"_get_cached_valueでエラー({key}, {idx}): {e}")
             # エラー時のデフォルト値
             default_values = {
                 'stoch_k': 50,
@@ -570,67 +655,170 @@ class IndicatorCalculator:
     def _calculate_dynamic_threshold(self, data):
         """動的閾値を計算（異常値は前後の値から推測）"""
         try:
-            # キャッシュからATRを取得
-            idx = data.index[-1]
-            atr = self._get_cached_value('atr', idx)
-            close = data['close'].iloc[-1]
-            
-            # 異常値チェック
-            if close <= 0 or pd.isna(close) or pd.isna(atr):
-                # 前後の正常データから推測値を算出
-                window_size = 5  # 前後5日分のデータを使用
+            # 辞書型の場合と、DataFrameの場合で処理を分ける
+            if isinstance(data, dict):
+                # 辞書型の場合は直接値を取得
+                atr = data.get('atr')
+                close = data.get('close')
                 
-                # closeが0または異常値の場合
-                if close <= 0 or pd.isna(close):
-                    # 直近の正常なclose値を取得
-                    valid_closes = data['close'][data['close'] > 0].dropna()
-                    if len(valid_closes) >= 2:
-                        # 直近の変動率を計算
-                        close_changes = valid_closes.pct_change()
-                        avg_change = close_changes.tail(window_size).mean()
-                        # 最後の正常値から推測値を計算
-                        close = valid_closes.iloc[-1] * (1 + avg_change)
-                    else:
-                        return 0.0
+                # 異常値チェック
+                if close is None or close <= 0 or pd.isna(close) or pd.isna(atr):
+                    return 0.0  # 異常値の場合はデフォルト値を返す
                 
-                # ATRが異常値の場合
-                if pd.isna(atr):
-                    # キャッシュからATRの時系列を取得
-                    if 'atr' in self._cache:
-                        valid_atrs = self._cache['atr'].dropna()
-                        if len(valid_atrs) > 0:
-                            atr = valid_atrs.mean()
+                # 動的閾値の計算
+                atr_ratio = (atr / close) * 100
+                base_threshold = 5.0
+                
+                # ATRの大きさに応じて閾値を調整
+                if atr_ratio > 3.0:  # 高ボラティリティ
+                    adjusted_threshold = base_threshold * 1.5
+                elif atr_ratio < 1.0:  # 低ボラティリティ
+                    adjusted_threshold = base_threshold * 0.5
+                else:
+                    adjusted_threshold = base_threshold
+                    
+                return adjusted_threshold
+            else:
+                # DataFrameの場合（元の処理）
+                idx = data.index[-1]
+                atr = self._get_cached_value('atr', idx)
+                close = data['close'].iloc[-1]
+                
+                # 異常値チェック
+                if close <= 0 or pd.isna(close) or pd.isna(atr):
+                    # 前後の正常データから推測値を算出
+                    window_size = 5  # 前後5日分のデータを使用
+                    
+                    # closeが0または異常値の場合
+                    if close <= 0 or pd.isna(close):
+                        # 直近の正常なclose値を取得
+                        valid_closes = data['close'][data['close'] > 0].dropna()
+                        if len(valid_closes) >= 2:
+                            # 直近の変動率を計算
+                            close_changes = valid_closes.pct_change()
+                            avg_change = close_changes.tail(window_size).mean()
+                            # 最後の正常値から推測値を計算
+                            close = valid_closes.iloc[-1] * (1 + avg_change)
                         else:
                             return 0.0
-                    else:
-                        return 0.0
-            
-            # 動的閾値の計算
-            atr_ratio = (atr / close) * 100
-            base_threshold = 5.0
-            dynamic_threshold = base_threshold * (atr_ratio / base_threshold)
-            
-            # 計算結果の妥当性チェック
-            if pd.isna(dynamic_threshold) or np.isinf(dynamic_threshold):
-                return 0.0
-            
-            return dynamic_threshold
-            
+                    
+                    # ATRが異常値の場合
+                    if pd.isna(atr):
+                        # キャッシュからATRの時系列を取得
+                        if 'atr' in self._cache:
+                            valid_atrs = self._cache['atr'].dropna()
+                            if len(valid_atrs) > 0:
+                                atr = valid_atrs.mean()
+                            else:
+                                return 0.0
+                        else:
+                            return 0.0
+                
+                # 動的閾値の計算
+                atr_ratio = (atr / close) * 100
+                base_threshold = 5.0
+                
+                # ATRの大きさに応じて閾値を調整
+                if atr_ratio > 3.0:  # 高ボラティリティ
+                    adjusted_threshold = base_threshold * 1.5
+                elif atr_ratio < 1.0:  # 低ボラティリティ
+                    adjusted_threshold = base_threshold * 0.5
+                else:
+                    adjusted_threshold = base_threshold
+                    
+                return adjusted_threshold
+                
         except Exception as e:
-            logging.error(f"動的閾値計算エラー: {str(e)}")
-            return 0.0
-
+            self.logger.error(f"動的閾値計算エラー: {str(e)}")
+            return 2.0  # エラー時のデフォルト値
+            
     def _calculate_weekly_trend(self, data):
-        """週別トレンドを計算"""
+        """週次トレンドを計算"""
         try:
-            weekly_data = data.resample('W', on='date').last()
-            sma_5 = weekly_data['close'].rolling(window=5).mean()
-            if len(sma_5) < 2:
-                return "UNKNOWN"
-            return "UP" if sma_5.iloc[-1] > sma_5.iloc[-2] else "DOWN"
+            # 辞書型の場合と、DataFrameの場合で処理を分ける
+            if isinstance(data, dict):
+                # 辞書型の場合は、トレンド判定ロジックを簡略化
+                close = data.get('close')
+                ichimoku_kijun = data.get('ichimoku_kijun')
+                macd = data.get('macd', 0)
+                rsi = data.get('rsi', 50)
+                
+                if close is None or ichimoku_kijun is None:
+                    return "neutral"  # データ不足の場合は中立
+                
+                # 簡易的なトレンド判定
+                trend_signals = 0
+                
+                # 一目均衡表基準線との関係で判定
+                if close > ichimoku_kijun:
+                    trend_signals += 1
+                elif close < ichimoku_kijun:
+                    trend_signals -= 1
+                    
+                # MACDの符号で判定
+                if macd > 0:
+                    trend_signals += 1
+                elif macd < 0:
+                    trend_signals -= 1
+                    
+                # RSIで判定
+                if rsi > 60:
+                    trend_signals += 1
+                elif rsi < 40:
+                    trend_signals -= 1
+                
+                # 総合判定
+                if trend_signals >= 2:
+                    return "uptrend"
+                elif trend_signals <= -2:
+                    return "downtrend"
+                else:
+                    return "neutral"
+            else:
+                # DataFrameの場合（元の処理）
+                # 週間リサンプリングで処理
+                weekly_data = data.resample('W').agg({
+                    'open': 'first',
+                    'high': 'max',
+                    'low': 'min',
+                    'close': 'last',
+                    'volume': 'sum'
+                })
+                
+                if len(weekly_data) < 4:  # 少なくとも4週間のデータが必要
+                    return "neutral"
+                
+                # 週間移動平均の計算
+                weekly_data['sma4'] = weekly_data['close'].rolling(window=4).mean()
+                weekly_data['sma8'] = weekly_data['close'].rolling(window=8).mean()
+                
+                # 最新の状態を取得
+                latest = weekly_data.iloc[-1]
+                
+                # トレンド判定
+                if latest['close'] > latest['sma4'] > latest['sma8']:
+                    # 追加確認: 3週連続の上昇かどうか
+                    price_changes = weekly_data['close'].pct_change().tail(4)
+                    if sum(price_changes > 0) >= 3:
+                        return "strong_uptrend"
+                    return "uptrend"
+                elif latest['close'] < latest['sma4'] < latest['sma8']:
+                    # 追加確認: 3週連続の下落かどうか
+                    price_changes = weekly_data['close'].pct_change().tail(4)
+                    if sum(price_changes < 0) >= 3:
+                        return "strong_downtrend"
+                    return "downtrend"
+                # 移動平均の位置関係のみで判断
+                elif latest['close'] > latest['sma8']:
+                    return "weak_uptrend"
+                elif latest['close'] < latest['sma8']:
+                    return "weak_downtrend"
+                else:
+                    return "neutral"
+                
         except Exception as e:
-            logging.error(f"週別トレンド計算エラー: {str(e)}")
-            return "UNKNOWN"
+            self.logger.error(f"週別トレンド計算エラー: {str(e)}")
+            return "neutral"  # エラー時のデフォルト値
 
 
 def calculate_ichimoku(high, low):

@@ -4,6 +4,8 @@ from repository.backtest_repository import BacktestRepository
 import logging
 import math
 import datetime
+from repository.stock_repository import StockRepository
+from typing import List, Dict, Optional, Tuple, Any
 
 logger = logging.getLogger(__name__)
 
@@ -349,3 +351,190 @@ def run_multiple_backtests(symbol: str, strategies=None, periods=None):
                 logger.error(f"バックテスト実行エラー: 銘柄={symbol}, 戦略={strategy}, 期間={start_date}～{end_date}, エラー={e}")
     
     return results
+
+class BacktestService:
+    """
+    バックテストを実行するサービスクラス
+    """
+    def __init__(self):
+        self.backtest_repository = BacktestRepository()
+        self.stock_repository = StockRepository()
+        self.logger = logging.getLogger(__name__)
+        
+    def run_backtest(self, code: str, industry_name: str, start_date: str, end_date: str, 
+                    strategy_type: str, initial_funds: int = 1000000, lot_size: int = 100) -> Optional[Dict]:
+        """
+        バックテストを実行します
+        
+        Args:
+            code (str): 銘柄コード
+            industry_name (str): 業種名
+            start_date (str): 開始日（YYYY-MM-DD）
+            end_date (str): 終了日（YYYY-MM-DD）
+            strategy_type (str): 戦略タイプ（'tr': トレンドフォロー, 're': 逆張り, 'bo': ブレイクアウト）
+            initial_funds (int): 初期資金
+            lot_size (int): 1取引あたりの株数
+            
+        Returns:
+            Optional[Dict]: バックテスト結果、実行失敗時はNone
+        """
+        try:
+            # 株価データ取得
+            price_data = self.stock_repository.get_stock_price_data(code, industry_name, start_date, end_date)
+            if not price_data or len(price_data) < 30:  # 最低30日分のデータが必要
+                self.logger.error(f"十分な株価データがありません: {code}")
+                return None
+                
+            # インジケーターデータ取得
+            indicator_data = self.stock_repository.get_stock_indicator_data(code, industry_name, start_date, end_date)
+            if not indicator_data:
+                self.logger.error(f"インジケーターデータがありません: {code}")
+                return None
+                
+            # データフレームの準備
+            price_df = pd.DataFrame(price_data)
+            price_df['date'] = pd.to_datetime(price_df['date'])
+            price_df.set_index('date', inplace=True)
+            
+            indicator_df = pd.DataFrame(indicator_data)
+            indicator_df['date'] = pd.to_datetime(indicator_df['date'])
+            indicator_df.set_index('date', inplace=True)
+            
+            # Backtrader用のデータフィードを作成
+            data = bt.feeds.PandasData(
+                dataname=price_df,
+                open='open',
+                high='high',
+                low='low',
+                close='close',
+                volume='volume',
+                openinterest=None
+            )
+            
+            # Cerebroインスタンスの作成
+            cerebro = bt.Cerebro()
+            cerebro.adddata(data)
+            cerebro.broker.setcash(initial_funds)
+            
+            # 戦略の追加
+            if strategy_type == 'tr':
+                cerebro.addstrategy(TrendFollowingStrategy, lot_size=lot_size)
+            elif strategy_type == 're':
+                cerebro.addstrategy(ReverseStrategy, lot_size=lot_size)
+            elif strategy_type == 'bo':
+                cerebro.addstrategy(BreakoutStrategy, lot_size=lot_size)
+            else:
+                self.logger.error(f"不明な戦略タイプ: {strategy_type}")
+                return None
+                
+            # バックテスト実行
+            initial_value = cerebro.broker.getvalue()
+            results = cerebro.run()
+            final_value = cerebro.broker.getvalue()
+            
+            # 結果の整形
+            strategy = results[0]
+            trades = []
+            
+            for trade in strategy.trades:
+                trades.append({
+                    'entry_date': trade['entry_date'].strftime('%Y-%m-%d'),
+                    'entry_price': trade['entry_price'],
+                    'lot_size': trade['lot_size'],
+                    'exit_date': trade['exit_date'].strftime('%Y-%m-%d') if trade['exit_date'] else None,
+                    'exit_price': trade['exit_price'],
+                    'profit': trade['profit']
+                })
+            
+            # 戦略名のマッピング
+            strategy_names = {
+                'tr': 'trend',
+                're': 'reverse',
+                'bo': 'breakout'
+            }
+            
+            backtest_result = {
+                'code': code,
+                'strategy': strategy_names.get(strategy_type, strategy_type),
+                'start_date': start_date,
+                'end_date': end_date,
+                'initial_funds': initial_funds,
+                'final_portfolio_value': final_value,
+                'return_percentage': ((final_value - initial_value) / initial_value) * 100,
+                'trades': trades,
+                'success_rate': strategy.stats.get('success_rate', 0),
+                'average_return': strategy.stats.get('avg_return', 0),
+                'max_drawdown': strategy.stats.get('max_drawdown', 0),
+                'total_trades': len(trades)
+            }
+            
+            return backtest_result
+            
+        except Exception as e:
+            self.logger.error(f"バックテスト実行中にエラー: {e}")
+            return None
+            
+    def run_multiple_strategy_backtest(self, code: str, industry_name: str, 
+                                     initial_funds: int = 1000000, period_years: int = 5) -> List[Dict]:
+        """
+        複数の戦略と期間でバックテストを実行します
+        
+        Args:
+            code (str): 銘柄コード
+            industry_name (str): 業種名
+            initial_funds (int): 初期資金
+            period_years (int): バックテスト対象期間（年）
+            
+        Returns:
+            List[Dict]: バックテスト結果のリスト
+        """
+        try:
+            # 戦略リスト
+            strategies = ['tr', 're', 'bo']  # トレンドフォロー、逆張り、ブレイクアウト
+            
+            # 期間の設定
+            today = datetime.date.today()
+            today_str = today.strftime('%Y-%m-%d')
+            
+            # 主要期間（全期間、直近1年、その前の1年）
+            periods = []
+            
+            # 全期間（指定年数）
+            years_ago = (today - datetime.timedelta(days=period_years*365)).strftime('%Y-%m-%d')
+            periods.append((years_ago, today_str))
+            
+            # 直近1年
+            one_year_ago = (today - datetime.timedelta(days=365)).strftime('%Y-%m-%d')
+            periods.append((one_year_ago, today_str))
+            
+            # その前の1年（もし指定期間が2年以上なら）
+            if period_years >= 2:
+                two_years_ago = (today - datetime.timedelta(days=2*365)).strftime('%Y-%m-%d')
+                periods.append((two_years_ago, one_year_ago))
+            
+            results = []
+            
+            # 各戦略と期間の組み合わせでバックテスト実行
+            for strategy in strategies:
+                for start_date, end_date in periods:
+                    try:
+                        result = self.run_backtest(
+                            code=code,
+                            industry_name=industry_name,
+                            start_date=start_date,
+                            end_date=end_date,
+                            strategy_type=strategy,
+                            initial_funds=initial_funds
+                        )
+                        
+                        if result:
+                            results.append(result)
+                            
+                    except Exception as e:
+                        self.logger.error(f"バックテスト実行エラー: 銘柄={code}, 戦略={strategy}, 期間={start_date}～{end_date}, エラー={e}")
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"複数戦略バックテスト実行中にエラー: {e}")
+            return []

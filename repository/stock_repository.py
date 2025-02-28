@@ -260,7 +260,7 @@ class StockRepository(BaseRepository):
                 self.reconnect()
             
             # 環境変数から取得日数を取得
-            fetch_range = os.getenv("FETCH_DATA_RANGE", "1")  # 範囲は年数。デフォルトは1年
+            fetch_range = os.getenv("CALC_INDICATOR_RANGE", "1")  # 範囲は年数。デフォルトは1年
             
             query = """
             SELECT code, date, open, high, low, close, volume
@@ -378,16 +378,39 @@ class StockRepository(BaseRepository):
             if isinstance(indicator_data, list):
                 filtered_data = []
                 for data in indicator_data:
+                    # 日付フォーマットの検証
+                    if 'date' not in data or not isinstance(data['date'], str):
+                        self.logger.warning(f"日付データが不正です: {data.get('date', 'None')}")
+                        continue
+                        
+                    # 日付フォーマットがYYYY-MM-DDであることを確認
+                    date_str = data['date']
+                    if not (len(date_str.split('-')) == 3 and len(date_str) == 10):
+                        self.logger.warning(f"日付フォーマットが不正です: {date_str}")
+                        continue
+                    
+                    # インジケーターデータの検証
                     if any(data.get(key) is None for key in required_keys):
-                        logging.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {data}")
+                        self.logger.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {data}")
                         continue
                     filtered_data.append(data)
                 indicator_data = filtered_data
                 if not indicator_data:
                     return False
             else:
+                # 単一のデータの場合の日付検証
+                if 'date' not in indicator_data or not isinstance(indicator_data['date'], str):
+                    self.logger.warning(f"単一データの日付が不正です: {indicator_data.get('date', 'None')}")
+                    return False
+                    
+                # 日付フォーマットがYYYY-MM-DDであることを確認
+                date_str = indicator_data['date']
+                if not (len(date_str.split('-')) == 3 and len(date_str) == 10):
+                    self.logger.warning(f"単一データの日付フォーマットが不正です: {date_str}")
+                    return False
+                
                 if any(indicator_data.get(key) is None for key in required_keys):
-                    logging.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {indicator_data}")
+                    self.logger.warning(f"インジケーター計算に必要なデータが不足しているため、銘柄 {code} のデータ挿入をスキップします: {indicator_data}")
                     return False
 
             # 安全に丸めるヘルパー関数
@@ -433,9 +456,12 @@ class StockRepository(BaseRepository):
             # リスト形式のデータを辞書形式に変換
             if isinstance(indicator_data, list):
                 for data in indicator_data:
+                    # 全ての値のログを書き出し（デバッグ用）
+                    self.logger.debug(f"挿入データ: date={data.get('date')}, code={code}")
+                    
                     params = {
                         'code': code,
-                        'date': data[0] if isinstance(data, (list, tuple)) else data.get('date'),
+                        'date': data.get('date'),  # 検証済みの日付文字列
                         'ichimoku_tenkan': safe_round(data.get('ichimoku_tenkan', 0)),
                         'ichimoku_kijun': safe_round(data.get('ichimoku_kijun', 0)),
                         'ichimoku_senkou_a': safe_round(data.get('ichimoku_senkou_a', 0)),
@@ -458,7 +484,7 @@ class StockRepository(BaseRepository):
                 # 単一のデータの場合
                 params = {
                     'code': code,
-                    'date': indicator_data.get('date'),
+                    'date': indicator_data.get('date'),  # 検証済みの日付文字列
                     'ichimoku_tenkan': safe_round(indicator_data.get('ichimoku_tenkan', 0)),
                     'ichimoku_kijun': safe_round(indicator_data.get('ichimoku_kijun', 0)),
                     'ichimoku_senkou_a': safe_round(indicator_data.get('ichimoku_senkou_a', 0)),
@@ -854,4 +880,283 @@ class StockRepository(BaseRepository):
         except Exception as e:
             self.logger.error(f"インジケーター保存エラー（コード: {code}）: {str(e)}")
             self.conn.rollback()
-            return False 
+            return False
+
+    def fetch_latest_indicators(self, code: str, industry_name: str, limit: int = 1) -> List[Dict]:
+        """
+        指定された銘柄の最新のインジケーターデータを取得
+        
+        Args:
+            code (str): 銘柄コード（4桁）
+            industry_name (str): 業種名のテーブルプレフィックス
+            limit (int): 取得する件数（デフォルト: 1）
+            
+        Returns:
+            List[Dict]: インジケーターデータのリスト
+        """
+        try:
+            query = f"""
+            SELECT date, ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a,
+                   ichimoku_senkou_b, adx, bb_lower, bb_middle, bb_upper,
+                   stoch_k, stoch_d, atr, rsi, macd, dynamic_threshold, 
+                   weekly_trend, pca_signal
+            FROM {industry_name}_indicator
+            WHERE code = %s
+            ORDER BY date DESC
+            LIMIT %s;
+            """
+            
+            # SQLクエリの内容を確認
+            formatted_query = self.cur.mogrify(query, (code, limit)).decode('utf-8')
+            self.logger.debug(f"実行SQL: {formatted_query}")
+            
+            self.cur.execute(query, (code, limit))
+            rows = self.cur.fetchall()
+            
+            self.logger.debug(f"取得した行数: {len(rows)}")
+            
+            return [
+                {
+                    'date': row[0].strftime('%Y%m%d') if row[0] else None,
+                    'ichimoku_tenkan': float(row[1]) if row[1] is not None else None,
+                    'ichimoku_kijun': float(row[2]) if row[2] is not None else None,
+                    'ichimoku_senkou_a': float(row[3]) if row[3] is not None else None,
+                    'ichimoku_senkou_b': float(row[4]) if row[4] is not None else None,
+                    'adx': float(row[5]) if row[5] is not None else None,
+                    'bb_lower': float(row[6]) if row[6] is not None else None,
+                    'bb_middle': float(row[7]) if row[7] is not None else None,
+                    'bb_upper': float(row[8]) if row[8] is not None else None,
+                    'stoch_k': float(row[9]) if row[9] is not None else None,
+                    'stoch_d': float(row[10]) if row[10] is not None else None,
+                    'atr': float(row[11]) if row[11] is not None else None,
+                    'rsi': float(row[12]) if row[12] is not None else None,
+                    'macd': float(row[13]) if row[13] is not None else None,
+                    'dynamic_threshold': float(row[14]) if row[14] is not None else None,
+                    'weekly_trend': row[15] if row[15] is not None else None,
+                    'pca_signal': float(row[16]) if row[16] is not None else None
+                }
+                for row in rows
+            ]
+            
+        except Exception as e:
+            self.logger.error(f"最新インジケーター取得エラー（コード: {code}）: {str(e)}")
+            return []
+
+    def get_sector_stock_prices(self, sector_table: str, days: int = 90) -> Dict[str, List[Dict]]:
+        try:
+            query = f"""
+            SELECT p.code, p.date, p.open, p.high, p.low, p.close, p.volume
+            FROM {sector_table}_price p
+            WHERE p.date > CURRENT_DATE - INTERVAL '{days} days'
+            ORDER BY p.code, p.date
+            """
+            self.cur.execute(query)
+            rows = self.cur.fetchall()
+            result = {}
+            
+            for row in rows:
+                code, date, open_price, high, low, close, volume = row
+                if code not in result:
+                    result[code] = []
+                result[code].append({
+                    'date': date,
+                    'open': open_price,
+                    'high': high,
+                    'low': low,
+                    'close': close,
+                    'volume': volume
+                })
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"セクター株価データ取得エラー: {e}")
+            return {}
+
+    def get_latest_price(self, code: str, industry_name: str) -> Optional[Dict]:
+        """
+        指定された銘柄の最新の株価データを取得します
+        
+        Args:
+            code (str): 銘柄コード
+            industry_name (str): 業種名
+            
+        Returns:
+            Optional[Dict]: 最新の株価データ、データがない場合はNone
+        """
+        try:
+            # 業種名からテーブル接頭辞を取得
+            table_prefix = TableCategory.get_table_prefix(industry_name)
+            if not table_prefix:
+                logging.error(f"業種名に対応するテーブル接頭辞が見つかりません: {industry_name}")
+                return None
+                
+            # 最新の株価データを取得するクエリ
+            query = f"""
+            SELECT date, open, high, low, close, volume
+            FROM {table_prefix}_price
+            WHERE code = %s
+            ORDER BY date DESC
+            LIMIT 1
+            """
+            
+            self.cur.execute(query, (code,))
+            result = self.cur.fetchone()
+            
+            if not result:
+                logging.warning(f"銘柄の最新株価データが見つかりません: {code}")
+                return None
+                
+            # 結果を辞書形式に変換
+            price_data = {
+                'date': result[0],
+                'open': float(result[1]),
+                'high': float(result[2]),
+                'low': float(result[3]),
+                'close': float(result[4]),
+                'volume': int(result[5])
+            }
+            
+            return price_data
+            
+        except Exception as e:
+            logging.error(f"最新株価データの取得中にエラーが発生しました: {e}")
+            return None
+            
+    def get_stock_price_data(self, code: str, industry_name: str, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """
+        指定された銘柄の株価データを取得します
+        
+        Args:
+            code (str): 銘柄コード
+            industry_name (str): 業種名
+            start_date (str, optional): 開始日（YYYY-MM-DD形式）
+            end_date (str, optional): 終了日（YYYY-MM-DD形式）
+            
+        Returns:
+            List[Dict]: 株価データのリスト
+        """
+        try:
+            # 業種名からテーブル接頭辞を取得
+            table_prefix = TableCategory.get_table_prefix(industry_name)
+            if not table_prefix:
+                logging.error(f"業種名に対応するテーブル接頭辞が見つかりません: {industry_name}")
+                return []
+                
+            # クエリの基本部分
+            query = f"""
+            SELECT date, open, high, low, close, volume
+            FROM {table_prefix}_price
+            WHERE code = %s
+            """
+            
+            params = [code]
+            
+            # 日付条件の追加
+            if start_date:
+                query += " AND date >= %s"
+                params.append(start_date)
+                
+            if end_date:
+                query += " AND date <= %s"
+                params.append(end_date)
+                
+            # 日付順にソート
+            query += " ORDER BY date ASC"
+            
+            self.cur.execute(query, params)
+            results = self.cur.fetchall()
+            
+            # 結果を辞書のリストに変換
+            price_data = []
+            for row in results:
+                price_data.append({
+                    'date': row[0],
+                    'open': float(row[1]),
+                    'high': float(row[2]),
+                    'low': float(row[3]),
+                    'close': float(row[4]),
+                    'volume': int(row[5])
+                })
+                
+            return price_data
+            
+        except Exception as e:
+            logging.error(f"株価データの取得中にエラーが発生しました: {e}")
+            return []
+            
+    def get_stock_indicator_data(self, code: str, industry_name: str, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """
+        指定された銘柄のインジケーターデータを取得します
+        
+        Args:
+            code (str): 銘柄コード
+            industry_name (str): 業種名
+            start_date (str, optional): 開始日（YYYY-MM-DD形式）
+            end_date (str, optional): 終了日（YYYY-MM-DD形式）
+            
+        Returns:
+            List[Dict]: インジケーターデータのリスト
+        """
+        try:
+            # 業種名からテーブル接頭辞を取得
+            table_prefix = TableCategory.get_table_prefix(industry_name)
+            if not table_prefix:
+                logging.error(f"業種名に対応するテーブル接頭辞が見つかりません: {industry_name}")
+                return []
+                
+            # クエリの基本部分
+            query = f"""
+            SELECT date, ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a, ichimoku_senkou_b,
+                   adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr, rsi, macd,
+                   dynamic_threshold, weekly_trend, pca_signal
+            FROM {table_prefix}_indicator
+            WHERE code = %s
+            """
+            
+            params = [code]
+            
+            # 日付条件の追加
+            if start_date:
+                query += " AND date >= %s"
+                params.append(start_date)
+                
+            if end_date:
+                query += " AND date <= %s"
+                params.append(end_date)
+                
+            # 日付順にソート
+            query += " ORDER BY date ASC"
+            
+            self.cur.execute(query, params)
+            results = self.cur.fetchall()
+            
+            # 結果を辞書のリストに変換
+            indicator_data = []
+            for row in results:
+                data = {
+                    'date': row[0],
+                    'ichimoku_tenkan': float(row[1]) if row[1] is not None else None,
+                    'ichimoku_kijun': float(row[2]) if row[2] is not None else None,
+                    'ichimoku_senkou_a': float(row[3]) if row[3] is not None else None,
+                    'ichimoku_senkou_b': float(row[4]) if row[4] is not None else None,
+                    'adx': float(row[5]) if row[5] is not None else None,
+                    'bb_lower': float(row[6]) if row[6] is not None else None,
+                    'bb_middle': float(row[7]) if row[7] is not None else None,
+                    'bb_upper': float(row[8]) if row[8] is not None else None,
+                    'stoch_k': float(row[9]) if row[9] is not None else None,
+                    'stoch_d': float(row[10]) if row[10] is not None else None,
+                    'atr': float(row[11]) if row[11] is not None else None,
+                    'rsi': float(row[12]) if row[12] is not None else None,
+                    'macd': float(row[13]) if row[13] is not None else None,
+                    'dynamic_threshold': float(row[14]) if row[14] is not None else None,
+                    'weekly_trend': row[15],
+                    'pca_signal': float(row[16]) if row[16] is not None else None
+                }
+                indicator_data.append(data)
+                
+            return indicator_data
+            
+        except Exception as e:
+            logging.error(f"インジケーターデータの取得中にエラーが発生しました: {e}")
+            return [] 

@@ -1,6 +1,6 @@
 import os
 from typing import List, Dict, Optional, Any
-from datetime import datetime
+from datetime import datetime, date
 from .base_repository import BaseRepository
 
 class EntryRepository(BaseRepository):
@@ -386,11 +386,11 @@ class EntryRepository(BaseRepository):
     def save_full_judgment_data(self, judgment_data: Dict, stock_data: Dict, 
                               backtest_data: Dict = None, processing_info: Dict = None) -> bool:
         """
-        AIによる判断結果とバックテスト結果を一括で保存します
+        AI判断、株価データ、バックテスト結果を一括で保存
         
         Args:
             judgment_data (Dict): AIによる判断結果
-            stock_data (Dict): 銘柄情報
+            stock_data (Dict): 対象銘柄の株価データ
             backtest_data (Dict, optional): バックテスト結果
             processing_info (Dict, optional): 処理情報
             
@@ -399,28 +399,126 @@ class EntryRepository(BaseRepository):
         """
         try:
             # トランザクション開始
-            self.conn.autocommit = False
-            
-            # AI判断結果を保存
-            judgment_id = self.save_ai_judgment(judgment_data, stock_data, processing_info)
-            
-            if not judgment_id:
-                raise Exception("AI判断結果の保存に失敗しました")
+            with self.conn:
+                # AIジャッジメントの保存
+                judgment_id = self.save_ai_judgment(judgment_data, stock_data, processing_info)
+                if not judgment_id:
+                    self.logger.error("AIジャッジメントの保存に失敗")
+                    return False
                 
-            # バックテスト結果がある場合は保存
-            if backtest_data:
-                backtest_success = self.save_backtest_results(judgment_id, backtest_data)
-                if not backtest_success:
-                    raise Exception("バックテスト結果の保存に失敗しました")
+                # バックテスト結果の保存
+                if backtest_data:
+                    if not self.save_backtest_results(judgment_id, backtest_data):
+                        self.logger.error("バックテスト結果の保存に失敗")
+                        return False
+                        
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"判断データの一括保存中にエラー: {e}")
+            return False
+
+    def get_active_entries(self) -> List[Dict]:
+        """
+        アクティブな（保有中の）エントリー情報を取得します
+        
+        Returns:
+            List[Dict]: アクティブなエントリー情報のリスト
+        """
+        try:
+            # テーブルエイリアス「e」を使わず、実際のテーブル構造に合わせたクエリに修正
+            query = """
+            SELECT 
+                code, entry_date, entry_price, stop_loss, target_price, 
+                reason, holding_period, risk_reward, quantity, status,
+                created_at, updated_at
+            FROM 
+                entries
+            WHERE 
+                status = 'active'
+            ORDER BY 
+                entry_date DESC;
+            """
             
-            # すべて成功したらコミット
-            self.conn.commit()
-            return True
+            self.cur.execute(query)
+            rows = self.cur.fetchall()
+            
+            if not rows:
+                return []
+                
+            entries = []
+            for row in rows:
+                entries.append({
+                    'code': row[0],
+                    'entry_date': row[1],
+                    'entry_price': row[2],
+                    'stop_loss': row[3],
+                    'target_price': row[4],
+                    'reason': row[5],
+                    'holding_period': row[6],
+                    'risk_reward': row[7],
+                    'quantity': row[8],
+                    'status': row[9],
+                    'created_at': row[10],
+                    'updated_at': row[11]
+                })
+                
+            return entries
             
         except Exception as e:
-            self.logger.error(f"全データ保存エラー: {e}")
+            self.logger.error(f"アクティブなエントリー取得中にエラー: {e}")
+            return []
+
+    def update_exit_info(self, entry_id: int, exit_price: float, exit_date: date, 
+                        profit: float, profit_rate: float, exit_reason: str) -> bool:
+        """
+        エントリーの売却情報を更新します
+        
+        Args:
+            entry_id (int): エントリーID
+            exit_price (float): 売却価格
+            exit_date (date): 売却日
+            profit (float): 利益額
+            profit_rate (float): 利益率（%）
+            exit_reason (str): 売却理由
+            
+        Returns:
+            bool: 更新成功でTrue
+        """
+        try:
+            query = """
+            UPDATE entries
+            SET 
+                exit_date = %s,
+                exit_price = %s,
+                profit = %s,
+                profit_rate = %s,
+                exit_reason = %s,
+                updated_at = NOW()
+            WHERE 
+                id = %s;
+            """
+            
+            self.cur.execute(query, (
+                exit_date,
+                exit_price,
+                profit,
+                profit_rate,
+                exit_reason,
+                entry_id
+            ))
+            
+            self.conn.commit()
+            
+            # 更新された行数を確認
+            if self.cur.rowcount > 0:
+                self.logger.info(f"エントリーID {entry_id} の売却情報を更新しました")
+                return True
+            else:
+                self.logger.warning(f"エントリーID {entry_id} の更新に失敗しました（該当レコードなし）")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"売却情報更新中にエラー: {e}")
             self.conn.rollback()
-            return False
-        finally:
-            # 自動コミットを戻す
-            self.conn.autocommit = True 
+            return False 
