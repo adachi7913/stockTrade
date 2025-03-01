@@ -544,7 +544,7 @@ class EntryJudgmentHandler:
             )
             
             # APIリクエスト
-            response = self._call_gemini_api(prompt)
+            response = self._query_gemini(prompt)
             
             if not response:
                 self.logger.error(f"銘柄 {code} の売却判断でAPIレスポンスの取得に失敗しました")
@@ -557,25 +557,52 @@ class EntryJudgmentHandler:
                 
             # レスポンスの解析
             try:
-                result = json.loads(response)
+                # _query_geminiはオブジェクトを返し、そのtext属性にレスポンステキストが含まれている
+                response_text = response.text
+                self.logger.debug(f"銘柄 {code} のAPIレスポンス: {response_text[:100]}...")
+                
+                # JSONブロックを抽出する試み
+                json_block = self._extract_json_block(response_text)
+                if json_block:
+                    self.logger.debug(f"抽出されたJSONブロック: {json_block}")
+                    result = json.loads(json_block)
+                else:
+                    # JSONブロックが見つからない場合は全体を解析
+                    self.logger.debug("JSONブロックが見つからないため、全体をJSONとして解析を試みます")
+                    result = json.loads(response_text)
+                
                 self.logger.info(f"銘柄 {code} の売却判断結果: {result}")
+                
+                # 結果が有効なJSONだが、必要なキーが欠けている場合
+                if not all(key in result for key in ["should_exit", "confidence", "reason"]):
+                    self.logger.warning(f"銘柄 {code} の売却判断結果に必要なキーが欠けています: {result}")
+                    # 必要なキーがない場合は、あるものは保持しつつ、ないものはデフォルト値を設定
+                    default_result = {
+                        "should_exit": False,
+                        "confidence": 0,
+                        "reason": "結果のフォーマットが不完全です",
+                        "strategy": "保持継続（デフォルト）"
+                    }
+                    # 既存のキーで上書き
+                    for key in result:
+                        if key in default_result:
+                            default_result[key] = result[key]
+                    result = default_result
+                
                 return result
                 
-            except json.JSONDecodeError:
-                self.logger.error(f"銘柄 {code} の売却判断でJSONパースに失敗しました: {response}")
+            except json.JSONDecodeError as e:
+                self.logger.error(f"銘柄 {code} の売却判断でJSONパースに失敗しました: {e}")
                 # テキスト応答からの情報抽出を試みる
-                should_exit = "exit" in response.lower() or "sell" in response.lower()
-                reason = self._extract_reason_from_text(response)
+                response_text = response.text
                 
-                return {
-                    "should_exit": should_exit,
-                    "confidence": 50,  # デフォルト値
-                    "reason": reason or "JSONパースに失敗しましたが、テキスト分析の結果です",
-                    "strategy": "保持継続（パース失敗時のデフォルト）" if not should_exit else "売却（パース失敗時の判断）"
-                }
+                # よりインテリジェントなテキスト分析
+                result = self._parse_text_response(response_text)
+                self.logger.info(f"テキスト分析による売却判断結果: {result}")
+                return result
                 
         except Exception as e:
-            self.logger.error(f"銘柄 {code} の売却判断中にエラーが発生しました: {e}")
+            self.logger.error(f"銘柄 {code} の売却判断中にエラーが発生しました: {e}", exc_info=True)
             return {
                 "should_exit": False,
                 "confidence": 0,
@@ -601,6 +628,10 @@ class EntryJudgmentHandler:
         """
         prompt = f"""
         あなたは株式投資の専門家です。以下の情報に基づいて、保有中の銘柄を売却すべきかどうかを判断してください。
+        【トレードスタイル】
+        - 短期スウィングトレード
+        - 想定保有期間：１～１４日
+        - ポジション：ロングのみ
 
         【銘柄情報】
         - 銘柄コード: {code}
@@ -658,4 +689,94 @@ class EntryJudgmentHandler:
             if line.strip() and len(line.strip()) > 10:  # 実質的な内容がある行
                 return line.strip()
                 
-        return None 
+        return None
+
+    def _extract_json_block(self, text: str) -> Optional[str]:
+        """
+        テキストからJSONブロックを抽出します。マークダウンの```json...```形式や
+        単なる{}で囲まれたJSON文字列を検出して抽出します。
+        
+        Args:
+            text (str): 抽出対象のテキスト
+            
+        Returns:
+            Optional[str]: 抽出されたJSON文字列、見つからない場合はNone
+        """
+        # マークダウンのJSON codeブロックを探す
+        md_pattern = r'```(?:json)?\s*({.*?})\s*```'
+        md_matches = re.findall(md_pattern, text, re.DOTALL)
+        if md_matches:
+            return md_matches[0]
+        
+        # JSON直接記述パターンを探す（{から始まり}で終わる全体をJSON候補として抽出）
+        # より複雑な正規表現で中括弧のネストも考慮する
+        json_pattern = r'({(?:[^{}]|(?:{[^{}]*})|(?:{(?:[^{}]|(?:{[^{}]*}))*}))*})'
+        json_matches = re.findall(json_pattern, text, re.DOTALL)
+        if json_matches:
+            # 最も長いマッチを取る（おそらく完全なJSONオブジェクト）
+            json_matches.sort(key=len, reverse=True)
+            for match in json_matches:
+                try:
+                    # 実際にパースできるか試す
+                    json.loads(match)
+                    return match
+                except json.JSONDecodeError:
+                    continue
+        
+        return None
+        
+    def _parse_text_response(self, text: str) -> Dict[str, Any]:
+        """
+        レスポンステキストを解析して売却判断を抽出します
+        
+        Args:
+            text (str): 解析対象のテキスト
+            
+        Returns:
+            Dict[str, Any]: 解析結果
+        """
+        # デフォルト結果
+        result = {
+            "should_exit": False,
+            "confidence": 50,  # デフォルト値
+            "reason": "テキスト解析の結果",
+            "strategy": "保持継続（テキスト解析による判断）"
+        }
+        
+        # 売却推奨のキーワード
+        exit_keywords = ["売却", "exit", "sell", "売り", "手放す", "クローズ", "利確", "損切り", "離脱"]
+        hold_keywords = ["保持", "継続", "hold", "ホールド", "キープ", "待機"]
+        
+        # 売却判断の抽出
+        should_exit = False
+        for keyword in exit_keywords:
+            if keyword in text.lower():
+                should_exit = True
+                result["strategy"] = "売却（テキスト解析による判断）"
+                break
+                
+        # 保持推奨が明示的に含まれているかチェック
+        for keyword in hold_keywords:
+            if keyword in text.lower():
+                should_exit = False
+                result["strategy"] = "保持継続（テキスト解析による判断）"
+                # exitキーワードよりholdキーワードを優先するため、すでにexit=Trueでも上書き
+                break
+                
+        result["should_exit"] = should_exit
+        
+        # 理由の抽出
+        reason = self._extract_reason_from_text(text)
+        if reason:
+            result["reason"] = reason
+            
+        # 信頼度のパターン
+        confidence_pattern = r'(?:信頼度|confidence)[:\s]*(\d+)'
+        confidence_match = re.search(confidence_pattern, text, re.IGNORECASE)
+        if confidence_match:
+            try:
+                result["confidence"] = int(confidence_match.group(1))
+            except ValueError:
+                pass
+                
+        return result 

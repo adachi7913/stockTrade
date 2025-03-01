@@ -362,59 +362,59 @@ class BacktestService:
         self.logger = logging.getLogger(__name__)
         
     def run_backtest(self, code: str, industry_name: str, start_date: str, end_date: str, 
-                    strategy_type: str, initial_funds: int = 1000000, lot_size: int = 100) -> Optional[Dict]:
+                   strategy_type: str = 'tr', initial_funds: int = 1000000, lot_size: int = 100) -> Optional[Dict]:
         """
-        バックテストを実行します
+        指定した銘柄、期間、戦略でバックテストを実行します
         
         Args:
             code (str): 銘柄コード
-            industry_name (str): 業種名
-            start_date (str): 開始日（YYYY-MM-DD）
-            end_date (str): 終了日（YYYY-MM-DD）
-            strategy_type (str): 戦略タイプ（'tr': トレンドフォロー, 're': 逆張り, 'bo': ブレイクアウト）
+            industry_name (str): 英語の業種名（テーブル接頭辞）
+            start_date (str): 開始日（YYYY-MM-DD形式）
+            end_date (str): 終了日（YYYY-MM-DD形式）
+            strategy_type (str): 戦略タイプ（'tr'=トレンド, 're'=逆張り, 'bo'=ブレイクアウト）
             initial_funds (int): 初期資金
-            lot_size (int): 1取引あたりの株数
+            lot_size (int): 取引単位（株数）
             
         Returns:
-            Optional[Dict]: バックテスト結果、実行失敗時はNone
+            Optional[Dict]: バックテスト結果、エラー時はNone
         """
         try:
-            # 株価データ取得
-            price_data = self.stock_repository.get_stock_price_data(code, industry_name, start_date, end_date)
-            if not price_data or len(price_data) < 30:  # 最低30日分のデータが必要
+            self.logger.info(f"バックテスト開始: 銘柄={code}, 業種={industry_name}, 戦略={strategy_type}, 期間={start_date}～{end_date}")
+            
+            # 株価データの取得
+            self.logger.debug(f"業種名（テーブル接頭辞）をそのまま使用: {industry_name}")
+            
+            # 株価データを取得
+            stock_repository = StockRepository()
+            stock_data = stock_repository.get_stock_price_data(
+                code=code,
+                industry_name=industry_name,  # 業種名は既に英語形式のテーブル接頭辞
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if not stock_data or len(stock_data) < 30:  # 最低限必要なデータ量
                 self.logger.error(f"十分な株価データがありません: {code}")
                 return None
                 
-            # インジケーターデータ取得
-            indicator_data = self.stock_repository.get_stock_indicator_data(code, industry_name, start_date, end_date)
-            if not indicator_data:
-                self.logger.error(f"インジケーターデータがありません: {code}")
-                return None
-                
-            # データフレームの準備
-            price_df = pd.DataFrame(price_data)
-            price_df['date'] = pd.to_datetime(price_df['date'])
-            price_df.set_index('date', inplace=True)
+            self.logger.info(f"株価データ取得成功: {len(stock_data)}件")
             
-            indicator_df = pd.DataFrame(indicator_data)
-            indicator_df['date'] = pd.to_datetime(indicator_df['date'])
-            indicator_df.set_index('date', inplace=True)
+            # DataFrameに変換
+            df = pd.DataFrame(stock_data)
             
-            # Backtrader用のデータフィードを作成
-            data = bt.feeds.PandasData(
-                dataname=price_df,
-                open='open',
-                high='high',
-                low='low',
-                close='close',
-                volume='volume',
-                openinterest=None
-            )
+            # 日付をdatetime型に変換し、インデックスに設定
+            df['date'] = pd.to_datetime(df['date'])
+            df.set_index('date', inplace=True)
             
-            # Cerebroインスタンスの作成
+            # backtradingのCerebroインスタンスを初期化
             cerebro = bt.Cerebro()
-            cerebro.adddata(data)
+            
+            # 初期資金の設定
             cerebro.broker.setcash(initial_funds)
+            
+            # データフィードを追加
+            data = bt.feeds.PandasData(dataname=df)
+            cerebro.adddata(data)
             
             # 戦略の追加
             if strategy_type == 'tr':
@@ -427,31 +427,52 @@ class BacktestService:
                 self.logger.error(f"不明な戦略タイプ: {strategy_type}")
                 return None
                 
-            # バックテスト実行
+            # バックテスト実行前の資金計算
             initial_value = cerebro.broker.getvalue()
-            results = cerebro.run()
+            self.logger.info(f"バックテスト開始資金: {initial_value:,.0f}円")
+            
+            # バックテスト実行
+            strategies = cerebro.run()
+            strategy = strategies[0]
+            
+            # 最終ポートフォリオ価値
             final_value = cerebro.broker.getvalue()
+            self.logger.info(f"バックテスト終了資金: {final_value:,.0f}円")
             
-            # 結果の整形
-            strategy = results[0]
-            trades = []
+            # 利益率計算
+            profit_percentage = ((final_value - initial_value) / initial_value) * 100
+            self.logger.info(f"利益率: {profit_percentage:.2f}%")
             
-            for trade in strategy.trades:
-                trades.append({
-                    'entry_date': trade['entry_date'].strftime('%Y-%m-%d'),
-                    'entry_price': trade['entry_price'],
-                    'lot_size': trade['lot_size'],
-                    'exit_date': trade['exit_date'].strftime('%Y-%m-%d') if trade['exit_date'] else None,
-                    'exit_price': trade['exit_price'],
-                    'profit': trade['profit']
-                })
+            # 取引履歴
+            trades = strategy.trades
             
-            # 戦略名のマッピング
+            # 戦略名称マッピング
             strategy_names = {
                 'tr': 'trend',
                 're': 'reverse',
                 'bo': 'breakout'
             }
+            
+            # strategy.statsのアクセス方法を修正
+            # ItemCollectionオブジェクトはgetメソッドを持たないため、hasattrでチェックしてから安全にアクセスする
+            success_rate = 0
+            average_return = 0
+            max_drawdown = 0
+            
+            try:
+                # 成功率の取得を試みる
+                if hasattr(strategy, 'stats') and hasattr(strategy.stats, 'success_rate'):
+                    success_rate = strategy.stats.success_rate
+                # 平均リターンの取得を試みる
+                if hasattr(strategy, 'stats') and hasattr(strategy.stats, 'avg_return'):
+                    average_return = strategy.stats.avg_return
+                # 最大ドローダウンの取得を試みる
+                if hasattr(strategy, 'stats') and hasattr(strategy.stats, 'max_drawdown'):
+                    max_drawdown = strategy.stats.max_drawdown
+                    
+                self.logger.debug(f"バックテスト統計情報: 成功率={success_rate}, 平均リターン={average_return}, 最大ドローダウン={max_drawdown}")
+            except Exception as stats_error:
+                self.logger.warning(f"バックテスト統計情報の取得中にエラー: {stats_error}")
             
             backtest_result = {
                 'code': code,
@@ -462,16 +483,16 @@ class BacktestService:
                 'final_portfolio_value': final_value,
                 'return_percentage': ((final_value - initial_value) / initial_value) * 100,
                 'trades': trades,
-                'success_rate': strategy.stats.get('success_rate', 0),
-                'average_return': strategy.stats.get('avg_return', 0),
-                'max_drawdown': strategy.stats.get('max_drawdown', 0),
+                'success_rate': success_rate,
+                'average_return': average_return,
+                'max_drawdown': max_drawdown,
                 'total_trades': len(trades)
             }
             
             return backtest_result
             
         except Exception as e:
-            self.logger.error(f"バックテスト実行中にエラー: {e}")
+            self.logger.error(f"バックテスト実行中にエラー: {e}", exc_info=True)
             return None
             
     def run_multiple_strategy_backtest(self, code: str, industry_name: str, 
@@ -481,7 +502,7 @@ class BacktestService:
         
         Args:
             code (str): 銘柄コード
-            industry_name (str): 業種名
+            industry_name (str): 業種名（英語のテーブル接頭辞）
             initial_funds (int): 初期資金
             period_years (int): バックテスト対象期間（年）
             
@@ -489,8 +510,11 @@ class BacktestService:
             List[Dict]: バックテスト結果のリスト
         """
         try:
+            self.logger.info(f"複数戦略バックテスト開始: 銘柄={code}, 業種={industry_name}, 期間={period_years}年")
+            
             # 戦略リスト
             strategies = ['tr', 're', 'bo']  # トレンドフォロー、逆張り、ブレイクアウト
+            self.logger.info(f"実行戦略: {', '.join(strategies)}")
             
             # 期間の設定
             today = datetime.date.today()
@@ -512,15 +536,18 @@ class BacktestService:
                 two_years_ago = (today - datetime.timedelta(days=2*365)).strftime('%Y-%m-%d')
                 periods.append((two_years_ago, one_year_ago))
             
+            self.logger.info(f"バックテスト期間: {len(periods)}期間 ({years_ago}～{today_str})")
+            
             results = []
             
             # 各戦略と期間の組み合わせでバックテスト実行
             for strategy in strategies:
                 for start_date, end_date in periods:
                     try:
+                        self.logger.info(f"バックテスト実行: 戦略={strategy}, 期間={start_date}～{end_date}")
                         result = self.run_backtest(
                             code=code,
-                            industry_name=industry_name,
+                            industry_name=industry_name,  # 業種名は既に英語形式のテーブル接頭辞
                             start_date=start_date,
                             end_date=end_date,
                             strategy_type=strategy,
@@ -529,12 +556,17 @@ class BacktestService:
                         
                         if result:
                             results.append(result)
+                            return_percentage = result.get('return_percentage', 0)
+                            self.logger.info(f"バックテスト結果: 戦略={strategy}, 期間={start_date}～{end_date}, リターン={return_percentage:.2f}%")
+                        else:
+                            self.logger.warning(f"バックテスト失敗: 戦略={strategy}, 期間={start_date}～{end_date}")
                             
                     except Exception as e:
-                        self.logger.error(f"バックテスト実行エラー: 銘柄={code}, 戦略={strategy}, 期間={start_date}～{end_date}, エラー={e}")
+                        self.logger.error(f"戦略 {strategy} のバックテスト中にエラー: {e}", exc_info=True)
             
+            self.logger.info(f"複数戦略バックテスト完了: 成功={len(results)}件")
             return results
             
         except Exception as e:
-            self.logger.error(f"複数戦略バックテスト実行中にエラー: {e}")
+            self.logger.error(f"複数戦略バックテスト実行中にエラー: {e}", exc_info=True)
             return []

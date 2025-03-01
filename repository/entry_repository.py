@@ -469,13 +469,14 @@ class EntryRepository(BaseRepository):
             self.logger.error(f"アクティブなエントリー取得中にエラー: {e}")
             return []
 
-    def update_exit_info(self, entry_id: int, exit_price: float, exit_date: date, 
+    def update_exit_info(self, code: str, entry_date: date, exit_price: float, exit_date: date, 
                         profit: float, profit_rate: float, exit_reason: str) -> bool:
         """
         エントリーの売却情報を更新します
         
         Args:
-            entry_id (int): エントリーID
+            code (str): 銘柄コード
+            entry_date (date): エントリー日
             exit_price (float): 売却価格
             exit_date (date): 売却日
             profit (float): 利益額
@@ -489,6 +490,7 @@ class EntryRepository(BaseRepository):
             query = """
             UPDATE entries
             SET 
+                status = 'sold',
                 exit_date = %s,
                 exit_price = %s,
                 profit = %s,
@@ -496,7 +498,7 @@ class EntryRepository(BaseRepository):
                 exit_reason = %s,
                 updated_at = NOW()
             WHERE 
-                id = %s;
+                code = %s AND entry_date = %s;
             """
             
             self.cur.execute(query, (
@@ -505,17 +507,18 @@ class EntryRepository(BaseRepository):
                 profit,
                 profit_rate,
                 exit_reason,
-                entry_id
+                code,
+                entry_date
             ))
             
             self.conn.commit()
             
             # 更新された行数を確認
             if self.cur.rowcount > 0:
-                self.logger.info(f"エントリーID {entry_id} の売却情報を更新しました")
+                self.logger.info(f"エントリー {code} ({entry_date}) の売却情報を更新しました")
                 return True
             else:
-                self.logger.warning(f"エントリーID {entry_id} の更新に失敗しました（該当レコードなし）")
+                self.logger.warning(f"エントリー {code} ({entry_date}) の更新に失敗しました（該当レコードなし）")
                 return False
                 
         except Exception as e:

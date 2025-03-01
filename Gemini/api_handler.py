@@ -113,7 +113,7 @@ class ApiHandler:
                 "entryPrice": "エントリー価格（金額のみ）" or "NG",
                 "stop_loss": "ストップロス価格（金額のみ）" or "NG",
                 "target_price": "利確目標（金額のみ）" or "NG",
-                "period": "推奨保有期間（整数）" or "NG",
+                "period": "推奨保有期間（整数:1 - 14）" or "NG",
                 "risk_reward": "リスクリワード比（計算結果）" or "NG"
             }},
             "no_entry_span": <再判断までの日数（整数:1 - 14）>

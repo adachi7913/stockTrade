@@ -4,61 +4,41 @@ import logging
 import os
 import datetime
 from service.backtest_service import run_backtest
-
-def setup_logging():
-    """ログの設定を行います"""
-    today = datetime.datetime.now()
-    year = today.strftime("%Y")
-    month = today.strftime("%m")
-    day = today.strftime("%d")
-    log_dir = os.path.join("log", year, month)
-    
-    # ログディレクトリが存在しない場合は作成
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    
-    # ファイル名は dd_backtest.log の形式
-    log_file = os.path.join(log_dir, f"{day}_backtest.log")
-    
-    # ロガーの設定
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    
-    # 既存のハンドラをクリア
-    if logger.hasHandlers():
-        logger.handlers.clear()
-    
-    # ファイルハンドラの設定
-    fh = logging.FileHandler(log_file, encoding="utf-8")
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-    
-    # コンソールハンドラの設定
-    ch = logging.StreamHandler()
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-    
-    return logger
+from utils.logging_config import setup_logging, cleanup_old_logs
 
 def main():
-    # ログの設定
-    logger = setup_logging()
+    """メイン関数"""
+    # ロギング設定
+    logger = setup_logging("backtest")
     logger.info("バックテスト処理を開始します")
-
-    parser = argparse.ArgumentParser(description="バックテスト実行用スクリプトです。")
-    parser.add_argument("symbol", type=str, help="銘柄シンボルを指定してください（例: 1301）")
-    parser.add_argument("start_date", type=str, help="開始日（YYYY-MM-DD形式）")
-    parser.add_argument("end_date", type=str, help="終了日（YYYY-MM-DD形式）")
-    parser.add_argument("strategy", type=str, choices=["tr", "re", "bo"],
-                        help="戦略タイプを指定してください: tr=trend, re=reverse, bo=breakout")
-    parser.add_argument("lot_size", type=int, nargs='?', default=100,
-                        help="1回の取引での発注数量（単位：株）（デフォルト: 100株）")
+    
+    # コマンドライン引数のパース
+    parser = argparse.ArgumentParser(description='バックテスト実行スクリプト')
+    parser.add_argument('--code', type=str, help='銘柄コード（例: 1234）')
+    parser.add_argument('--days', type=int, default=90, help='バックテスト期間（日数）')
+    parser.add_argument('--capital', type=float, default=1000000, help='初期資本（円）')
     args = parser.parse_args()
-
-    run_backtest(args.symbol, args.start_date, args.end_date, args.strategy, args.lot_size)
+    
+    if not args.code:
+        logger.error("銘柄コードが指定されていません")
+        print("銘柄コードの指定が必要です。例: python backtest.py --code 1234")
+        return
+    
+    try:
+        # バックテスト実行
+        logger.info(f"銘柄コード: {args.code}, 期間: {args.days}日, 初期資本: {args.capital:,}円")
+        result = run_backtest(args.code, days=args.days, initial_capital=args.capital)
+        
+        if result:
+            logger.info(f"バックテスト結果: 最終資産 {result['final_capital']:,.0f}円 "
+                       f"({result['profit_rate']:.2f}%), 取引回数: {result['trade_count']}回")
+        else:
+            logger.warning("バックテストの結果が得られませんでした")
+    
+    except Exception as e:
+        logger.error(f"バックテスト処理中にエラーが発生しました: {e}")
+    
     logger.info("バックテスト処理が完了しました")
 
 if __name__ == "__main__":
     main()
-    # python backtest.py 1301 2021-02-01 2025-02-18 tr 200

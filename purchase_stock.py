@@ -15,6 +15,7 @@ from lib.table_category import TableCategory
 from service.backtest_service import run_multiple_backtests
 from lib.stock_filter import filter_stock, calculate_entry_score
 from lib.prompt_generator import PromptGenerator
+from utils.logging_config import setup_logging, cleanup_old_logs
 
 # TODO: 全体的な機能強化
 # - 複数銘柄の同時処理
@@ -24,12 +25,7 @@ from lib.prompt_generator import PromptGenerator
 # - 定期実行の仕組み
 
 # ロギングの設定
-# フォーマット: 日時 - モジュール名 - ログレベル - メッセージ
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logger = setup_logging("stock_purchase")
 
 class StockPurchaseManager:
     """

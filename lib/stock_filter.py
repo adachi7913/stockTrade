@@ -132,70 +132,79 @@ def calculate_entry_score(stock_data, backtest_results, technical_indicators):
     total_score = 0
     max_score = 0
     
-    # バックテスト結果のスコアリング（50%のウェイト）
+    # スコア配分の調整（合計100点満点）
+    # - バックテスト結果: 40点
+    # - テクニカル指標: 35点
+    # - 保有期間とリターン: 25点
+    
+    # ----------------
+    # バックテスト結果のスコアリング（40点）
+    # ----------------
     if backtest_results and 'success_rate' in backtest_results and 'average_return' in backtest_results:
-        # 勝率スコア (0-25点)
+        # 勝率スコア (0-20点)
         success_rate = backtest_results.get('success_rate', 0)
-        success_score = min(25, success_rate / 4)  # 勝率100%で最大25点
+        success_score = min(20, success_rate / 5)  # 勝率100%で最大20点
         scores['success_rate'] = success_score
         total_score += success_score
-        max_score += 25
+        max_score += 20
         
-        # 平均リターンスコア (0-25点)
+        # 平均リターンスコア (0-20点)
         avg_return = backtest_results.get('average_return', 0)
-        return_score = min(25, max(0, avg_return * 25))  # 平均リターン1.0で最大25点
+        return_score = min(20, max(0, avg_return * 20))  # 平均リターン1.0で最大20点
         scores['average_return'] = return_score
         total_score += return_score
-        max_score += 25
+        max_score += 20
     else:
         logger.warning(f"{stock_code}: バックテスト結果が不足しているため、スコアリングに影響します")
     
-    # テクニカル指標のスコアリング（50%のウェイト）
+    # ----------------
+    # テクニカル指標のスコアリング（35点）
+    # ----------------
     if technical_indicators:
-        # RSIスコア (0-15点): 50-70が最適範囲
+        # RSIスコア (0-10点): 50-70が最適範囲
         rsi = technical_indicators.get('rsi')
         if rsi is not None:
             if 50 <= rsi <= 70:
-                rsi_score = 15
-            elif 40 <= rsi < 50 or 70 < rsi <= 80:
                 rsi_score = 10
+            elif 40 <= rsi < 50 or 70 < rsi <= 80:
+                rsi_score = 7
             elif 30 <= rsi < 40 or 80 < rsi <= 90:
-                rsi_score = 5
+                rsi_score = 3
             else:
                 rsi_score = 0
             scores['rsi'] = rsi_score
             total_score += rsi_score
-            max_score += 15
+            max_score += 10
         
-        # ストキャスティクス%Kスコア (0-10点): 40-80が最適範囲
+        # ストキャスティクス%Kスコア (0-7点): 40-80が最適範囲
         stoch_k = technical_indicators.get('stoch_k')
         if stoch_k is not None:
             if 40 <= stoch_k <= 80:
-                stoch_score = 10
+                stoch_score = 7
             elif 20 <= stoch_k < 40 or 80 < stoch_k <= 90:
-                stoch_score = 5
+                stoch_score = 3
             else:
                 stoch_score = 0
             scores['stoch_k'] = stoch_score
             total_score += stoch_score
-            max_score += 10
+            max_score += 7
         
-        # トレンドスコア (0-15点): ADXとトレンド方向
+        # トレンドスコア (0-10点): ADXとトレンド方向
         adx = technical_indicators.get('adx')
         if adx is not None:
             if adx >= 30:  # 強いトレンド
-                trend_score = 15
-            elif adx >= 20:  # 中程度のトレンド
                 trend_score = 10
+            elif adx >= 20:  # 中程度のトレンド
+                trend_score = 7
             elif adx >= 15:  # 弱いトレンド
-                trend_score = 5
+                trend_score = 3
             else:  # トレンドなし
                 trend_score = 0
             scores['trend'] = trend_score
             total_score += trend_score
-            max_score += 15
+            max_score += 10
         
-        # ボリンジャーバンド位置 (0-10点)
+        # ボリンジャーバンド位置 (0-8点)
         close = stock_data.get('close', 0)
         bb_lower = technical_indicators.get('bb_lower')
         bb_middle = technical_indicators.get('bb_middle')
@@ -208,20 +217,164 @@ def calculate_entry_score(stock_data, backtest_results, technical_indicators):
                 
                 # 理想的な位置は0.3〜0.5（やや下方から中央）
                 if 0.3 <= bb_position <= 0.5:
-                    bb_score = 10
+                    bb_score = 8
                 elif 0.1 <= bb_position < 0.3 or 0.5 < bb_position <= 0.7:
-                    bb_score = 5
+                    bb_score = 4
                 else:
                     bb_score = 0
                 
                 scores['bb_position'] = bb_score
                 total_score += bb_score
-                max_score += 10
+                max_score += 8
     else:
         logger.warning(f"{stock_code}: テクニカル指標が不足しているため、スコアリングに影響します")
     
+    # ----------------
+    # 保有期間と期待リターンのスコアリング（25点）
+    # ----------------
+    period = stock_data.get('period')
+    close_price = stock_data.get('close')  # 終値
+    entry_price = stock_data.get('entry_price')  # エントリー価格
+    target_price = stock_data.get('target_price')  # 目標価格
+    
+    if period is not None and (close_price is not None or entry_price is not None) and target_price is not None:
+        try:
+            # 保有期間を数値に変換（"30日"などの文字列からは数値のみを抽出）
+            if isinstance(period, str):
+                period_value = int(''.join(filter(str.isdigit, period)))
+            else:
+                period_value = int(period)
+                
+            # 基準価格（closeがあればclose、なければentry_price）
+            base_price = float(close_price if close_price is not None else entry_price)
+            target_price = float(target_price)
+            
+            # 価格変動を計算
+            price_change = target_price - base_price
+            
+            # 1日あたりの変動率(%)を計算
+            if period_value > 0 and base_price > 0:
+                daily_return_pct = ((price_change / period_value) / base_price) * 100
+            else:
+                daily_return_pct = 0
+                
+            # 期間の短さによるスコア (0-10点)
+            # 1-4日: 最高点、5-9日: 高得点、10-14日: 中得点、15日以上: 低得点
+            if period_value <= 4:
+                period_score = 10
+            elif period_value <= 9:
+                period_score = 8
+            elif period_value <= 14:
+                period_score = 6
+            else:
+                # 14日以上は徐々に減少（最低2点）
+                period_score = max(2, 8 - ((period_value - 14) // 7))
+                
+            scores['period'] = period_score
+            total_score += period_score
+            max_score += 10
+            
+            # 1日あたりの期待リターン率によるスコア (0-15点)
+            # 1日あたり1.5%以上が最高点
+            if daily_return_pct >= 1.5:
+                return_rate_score = 15
+            elif daily_return_pct >= 1.0:
+                return_rate_score = 12
+            elif daily_return_pct >= 0.7:
+                return_rate_score = 9
+            elif daily_return_pct >= 0.5:
+                return_rate_score = 6
+            elif daily_return_pct > 0:
+                return_rate_score = 3
+            else:
+                return_rate_score = 0
+                
+            scores['daily_return'] = return_rate_score
+            total_score += return_rate_score
+            max_score += 15
+            
+            # 短期高リターンの組み合わせボーナス
+            # 期間7日以下かつ1日あたり1%以上で特別加点
+            if period_value <= 7 and daily_return_pct >= 1.0:
+                combination_bonus = 5  # 短期高リターンボーナス
+                scores['short_high_bonus'] = combination_bonus
+                total_score += combination_bonus
+                # この特別ボーナスの場合、max_scoreは加算しない（100点を超える可能性あり）
+                # 最終的に100点に正規化されるため
+                
+            logger.info(f"{stock_code}: 期間={period_value}日, 1日あたり期待リターン={daily_return_pct:.2f}%/日, " +
+                      f"期間スコア={period_score}, 日次リターンスコア={return_rate_score}")
+                
+        except (ValueError, TypeError) as e:
+            logger.warning(f"{stock_code}: 期間またはリターンの変換エラー: {e}")
+    # expected_returnが直接提供されている場合のフォールバック処理
+    elif period is not None and stock_data.get('expected_return') is not None:
+        try:
+            # 保有期間を数値に変換
+            if isinstance(period, str):
+                period_value = int(''.join(filter(str.isdigit, period)))
+            else:
+                period_value = int(period)
+                
+            # 期待リターンを数値に変換
+            expected_return = stock_data.get('expected_return')
+            if isinstance(expected_return, str):
+                expected_return_value = float(expected_return.replace('%', ''))
+            else:
+                expected_return_value = float(expected_return)
+                
+            # 1日あたりの期待リターンを計算
+            daily_return_pct = expected_return_value / period_value if period_value > 0 else 0
+            
+            # 期間スコア（前と同じロジック）
+            if period_value <= 4:
+                period_score = 10
+            elif period_value <= 9:
+                period_score = 8
+            elif period_value <= 14:
+                period_score = 6
+            else:
+                period_score = max(2, 8 - ((period_value - 14) // 7))
+                
+            scores['period'] = period_score
+            total_score += period_score
+            max_score += 10
+            
+            # 1日あたりの期待リターン率によるスコア（前と同じロジック）
+            if daily_return_pct >= 1.5:
+                return_rate_score = 15
+            elif daily_return_pct >= 1.0:
+                return_rate_score = 12
+            elif daily_return_pct >= 0.7:
+                return_rate_score = 9
+            elif daily_return_pct >= 0.5:
+                return_rate_score = 6
+            elif daily_return_pct > 0:
+                return_rate_score = 3
+            else:
+                return_rate_score = 0
+                
+            scores['daily_return'] = return_rate_score
+            total_score += return_rate_score
+            max_score += 15
+            
+            # 短期高リターンボーナス（前と同じロジック）
+            if period_value <= 7 and daily_return_pct >= 1.0:
+                combination_bonus = 5
+                scores['short_high_bonus'] = combination_bonus
+                total_score += combination_bonus
+                
+            logger.info(f"{stock_code}: 期間={period_value}日, 1日あたり期待リターン={daily_return_pct:.2f}%/日, " +
+                      f"期間スコア={period_score}, 日次リターンスコア={return_rate_score}")
+                      
+        except (ValueError, TypeError) as e:
+            logger.warning(f"{stock_code}: 期間またはリターンの変換エラー: {e}")
+    else:
+        logger.warning(f"{stock_code}: 期間、価格情報が不足しています (period={period}, close={close_price}, target={target_price})")
+    
     # 最終スコアの計算（0-100に正規化）
     final_score = (total_score / max_score * 100) if max_score > 0 else 0
+    final_score = min(100, final_score)  # 100点以上にならないよう制限
     
     # スコアの詳細をログに記録
     logger.info(f"{stock_code}: エントリースコア計算 - 最終スコア: {final_score:.2f}/100")

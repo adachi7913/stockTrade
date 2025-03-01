@@ -973,7 +973,7 @@ class StockRepository(BaseRepository):
             self.logger.error(f"セクター株価データ取得エラー: {e}")
             return {}
 
-    def get_latest_price(self, code: str, industry_name: str) -> Optional[Dict]:
+    def get_latest_price(self, code: str, table_prefix: str) -> Optional[Dict]:
         """
         指定された銘柄の最新の株価データを取得します
         
@@ -985,12 +985,6 @@ class StockRepository(BaseRepository):
             Optional[Dict]: 最新の株価データ、データがない場合はNone
         """
         try:
-            # 業種名からテーブル接頭辞を取得
-            table_prefix = TableCategory.get_table_prefix(industry_name)
-            if not table_prefix:
-                logging.error(f"業種名に対応するテーブル接頭辞が見つかりません: {industry_name}")
-                return None
-                
             # 最新の株価データを取得するクエリ
             query = f"""
             SELECT date, open, high, low, close, volume
@@ -1029,7 +1023,7 @@ class StockRepository(BaseRepository):
         
         Args:
             code (str): 銘柄コード
-            industry_name (str): 業種名
+            industry_name (str): 業種名（英語のテーブル接頭辞）
             start_date (str, optional): 開始日（YYYY-MM-DD形式）
             end_date (str, optional): 終了日（YYYY-MM-DD形式）
             
@@ -1037,11 +1031,9 @@ class StockRepository(BaseRepository):
             List[Dict]: 株価データのリスト
         """
         try:
-            # 業種名からテーブル接頭辞を取得
-            table_prefix = TableCategory.get_table_prefix(industry_name)
-            if not table_prefix:
-                logging.error(f"業種名に対応するテーブル接頭辞が見つかりません: {industry_name}")
-                return []
+            # 業種名は既に英語のテーブル接頭辞として扱う
+            table_prefix = industry_name
+            self.logger.debug(f"株価データ取得: コード={code}, テーブル接頭辞={table_prefix}")
                 
             # クエリの基本部分
             query = f"""
@@ -1064,8 +1056,11 @@ class StockRepository(BaseRepository):
             # 日付順にソート
             query += " ORDER BY date ASC"
             
+            self.logger.debug(f"実行SQL: {self.cur.mogrify(query, params).decode('utf-8')}")
             self.cur.execute(query, params)
             results = self.cur.fetchall()
+            
+            self.logger.debug(f"取得行数: {len(results)}")
             
             # 結果を辞書のリストに変換
             price_data = []
@@ -1082,7 +1077,7 @@ class StockRepository(BaseRepository):
             return price_data
             
         except Exception as e:
-            logging.error(f"株価データの取得中にエラーが発生しました: {e}")
+            self.logger.error(f"株価データの取得中にエラーが発生しました: {e}", exc_info=True)
             return []
             
     def get_stock_indicator_data(self, code: str, industry_name: str, start_date: str = None, end_date: str = None) -> List[Dict]:
@@ -1091,7 +1086,7 @@ class StockRepository(BaseRepository):
         
         Args:
             code (str): 銘柄コード
-            industry_name (str): 業種名
+            industry_name (str): 業種名（英語のテーブル接頭辞）
             start_date (str, optional): 開始日（YYYY-MM-DD形式）
             end_date (str, optional): 終了日（YYYY-MM-DD形式）
             
@@ -1099,16 +1094,14 @@ class StockRepository(BaseRepository):
             List[Dict]: インジケーターデータのリスト
         """
         try:
-            # 業種名からテーブル接頭辞を取得
-            table_prefix = TableCategory.get_table_prefix(industry_name)
-            if not table_prefix:
-                logging.error(f"業種名に対応するテーブル接頭辞が見つかりません: {industry_name}")
-                return []
-                
+            # 業種名は既に英語のテーブル接頭辞として扱う
+            table_prefix = industry_name
+            self.logger.debug(f"インジケーターデータ取得: コード={code}, テーブル接頭辞={table_prefix}")
+            
             # クエリの基本部分
             query = f"""
-            SELECT date, ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a, ichimoku_senkou_b,
-                   adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr, rsi, macd,
+            SELECT date, ichimoku_tenkan, ichimoku_kijun, ichimoku_senkou_a, ichimoku_senkou_b, 
+                   adx, bb_lower, bb_middle, bb_upper, stoch_k, stoch_d, atr, rsi, macd, 
                    dynamic_threshold, weekly_trend, pca_signal
             FROM {table_prefix}_indicator
             WHERE code = %s
@@ -1128,8 +1121,11 @@ class StockRepository(BaseRepository):
             # 日付順にソート
             query += " ORDER BY date ASC"
             
+            self.logger.debug(f"実行SQL: {self.cur.mogrify(query, params).decode('utf-8')}")
             self.cur.execute(query, params)
             results = self.cur.fetchall()
+            
+            self.logger.debug(f"取得行数: {len(results)}")
             
             # 結果を辞書のリストに変換
             indicator_data = []
@@ -1158,5 +1154,5 @@ class StockRepository(BaseRepository):
             return indicator_data
             
         except Exception as e:
-            logging.error(f"インジケーターデータの取得中にエラーが発生しました: {e}")
+            self.logger.error(f"インジケーターデータの取得中にエラーが発生しました: {e}", exc_info=True)
             return [] 

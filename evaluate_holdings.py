@@ -17,28 +17,9 @@ from utils.logging_config import setup_logging
 # .envファイルをロード
 load_dotenv()
 
-# ロギングの設定
-def setup_logging():
-    log_dir = "log"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    
-    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(log_dir, f"holdings_evaluation_{current_time}.log")
-    
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
-
 class HoldingsEvaluator:
     def __init__(self):
-        self.logger = setup_logging()
+        self.logger = setup_logging("holdings_evaluation")
         self.browser_test = BrowserUse()
         self.stock_repository = StockRepository()
 
