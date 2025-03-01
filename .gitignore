@@ -12,3 +12,8 @@ pandas-ta/
 price_csv/
 *prompt.txt
 report/
+.cursorrules
+.tachibana_credentials
+docker-compose.yml
+Dockerfile
+refresh_views.bat
