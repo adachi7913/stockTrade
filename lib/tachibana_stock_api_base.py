@@ -250,7 +250,6 @@ def func_api_req(str_url):
     # APIに接続
     http = urllib3.PoolManager()
     req = http.request('GET', str_url)
-    print("req.status= ", req.status )
 
     # 取得したデータを、json.loadsを利用できるようにstr型に変換する。日本語はshift-jis。
     bytes_reqdata = req.data
