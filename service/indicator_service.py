@@ -4,15 +4,17 @@ from repository.stock_repository import StockRepository
 from lib.indicator_calculator import IndicatorCalculator
 
 class IndicatorService:
-    def __init__(self, stock_repository: StockRepository):
+    def __init__(self, stock_repository: StockRepository, logger=None):
         """
         株価インジケーター計算を行うサービスクラス
         
         Args:
             stock_repository (StockRepository): 株価データリポジトリ
+            logger: ロガーインスタンス（Noneの場合はデフォルトのロガーを使用）
         """
         self.stock_repository = stock_repository
-        self.logger = logging.getLogger(__name__)
+        # 指定されたロガーがあればそれを使用、なければデフォルトロガーを使用
+        self.logger = logger if logger else logging.getLogger(__name__)
         # 業種名キャッシュ
         self.industry_cache = {}
 

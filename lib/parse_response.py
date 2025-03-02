@@ -23,8 +23,11 @@ def convert_decimal_to_float(value):
         return float(value)
     return value
 
-def validate_response_data(data):
+def validate_response_data(data, logger=None):
     """レスポンスデータの検証"""
+    # ロガーの設定
+    log = logger if logger else logging.getLogger()
+    
     required_fields = {
         'date': str,
         'code': str,
@@ -41,52 +44,64 @@ def validate_response_data(data):
     
     for field, expected_type in required_fields.items():
         if field not in data:
-            logging.error(f"Missing required field: {field}")
+            log.error(f"Missing required field: {field}")
             return False
         
         value = data[field]
         if not isinstance(value, expected_type):
             try:
                 if field in ['rule_entry_price', 'rule_stop_limit', 'rule_top_price', 'risk_reward']:
-                    # 数値型の場合は文字列に変換
-                    if isinstance(value, (int, float, Decimal)):
-                        data[field] = str(value)
-                    else:
-                        logging.error(f"Invalid type for {field}: expected {expected_type}, got {type(value)}")
-                        return False
-                elif field == 'close' and isinstance(value, Decimal):
-                    data[field] = float(value)  # Decimalをfloatに変換
-                elif field == 'entry_score' and isinstance(value, str):
-                    data[field] = int(float(value))  # 文字列の場合は数値に変換
-                else:
-                    logging.error(f"Invalid type for {field}: expected {expected_type}, got {type(value)}")
-                    return False
-            except (ValueError, TypeError) as e:
-                logging.error(f"Value conversion error for {field}: {e}")
+                    # ルールのNG値や範囲値は文字列として許容
+                    if isinstance(value, str) and (value == "NG" or "-" in value):
+                        continue
+                    # 数値型の場合は文字列に変換して許容
+                    if isinstance(value, (int, float)) and str(value):
+                        continue
+                # 数値型へ変換可能な文字列は許容（例: "100"）
+                if field in ['close', 'entry_score', 'no_entry_span'] and isinstance(value, str) and value.isdigit():
+                    continue
+                log.error(f"Field {field} has unexpected type. Expected {expected_type}, got {type(value)}")
+                return False
+            except Exception as e:
+                log.error(f"Error processing field {field}: {e}")
                 return False
     
-    # 日付フォーマットの検証
+    # 日付のフォーマット検証
     if not validate_date_format(data['date']):
-        logging.error(f"Invalid date format: {data['date']}")
+        log.error(f"Invalid date format: {data['date']}")
         return False
     
-    # entry_scoreの範囲検証
-    if not (0 <= data['entry_score'] <= 1000):
-        logging.error(f"entry_score out of range: {data['entry_score']}")
+    # エントリースコアの範囲検証（0〜1000）
+    entry_score = data['entry_score']
+    if not (0 <= entry_score <= 1000):
+        log.error(f"entry_score out of range: {entry_score}")
         return False
     
-    # no_entry_spanの範囲検証
-    if not (1 <= data['no_entry_span'] <= 14):
-        logging.error(f"no_entry_span out of range: {data['no_entry_span']}")
+    # エントリー期間の再判断日数（1〜14日）
+    no_entry_span = data['no_entry_span']
+    if not (1 <= no_entry_span <= 14):
+        log.error(f"no_entry_span out of range: {data['no_entry_span']}")
         return False
     
     return True
 
-def parse_response(full_data, response):
+def parse_response(full_data, response, code=None, logger=None):
     """
     AIからのレスポンスと株価データ（full_data）をもとに,
     DB挿入用のデータを返却する関数。
+    
+    Args:
+        full_data (list): 株価データのリスト
+        response (str/dict): AI APIからのレスポンス
+        code (str, optional): 銘柄コード。指定されない場合はfull_dataから取得を試みる
+        logger (logging.Logger, optional): ロガーオブジェクト
+        
+    Returns:
+        dict or None: DB挿入用のデータ、解析失敗時はNone
     """
+    # ロガーの設定
+    log = logger if logger else logging.getLogger()
+    
     try:
         # レスポンスが文字列の場合はJSONに変換
         response_data = json.loads(response) if isinstance(response, str) else response
@@ -112,13 +127,22 @@ def parse_response(full_data, response):
             else:
                 expected_return = None  # NGの代わりにNULLを使用
         except Exception as e:
-            logging.error(f"Expected return calculation error: {e}")
+            log.error(f"Expected return calculation error: {e}")
             expected_return = None
+            
+        # コードの取得（引数で指定されていれば優先、そうでなければfull_dataから取得を試みる）
+        stock_code = code
+        if stock_code is None and full_data and len(full_data) > 0 and "code" in full_data[-1]:
+            stock_code = full_data[-1]["code"]
+        
+        if stock_code is None:
+            log.error("銘柄コードが見つかりません")
+            return None
 
         insert_data = {
-            "date": full_data[-1]["date"],
-            "code": full_data[-1]["code"],
-            "close": full_data[-1]["close"],
+            "date": full_data[-1]["date"] if full_data and len(full_data) > 0 else datetime.now().strftime('%Y%m%d'),
+            "code": stock_code,
+            "close": full_data[-1]["close"] if full_data and len(full_data) > 0 and "close" in full_data[-1] else 0,
             "rule_entry_price": rule_entry_price,
             "rule_stop_limit": rule_stop_limit,
             "rule_top_price": rule_top_price,
@@ -131,12 +155,12 @@ def parse_response(full_data, response):
         }
         
         # データの検証
-        if validate_response_data(insert_data):
+        if validate_response_data(insert_data, logger=log):
             return insert_data
         return None
         
     except Exception as e:
-        logging.error(f"パースエラー: {e}")
+        log.error(f"パースエラー: {e}")
         return None
 
 def extract_json_from_text(text):

@@ -83,6 +83,23 @@ class BacktestRepository(BaseRepository):
                 con=self.engine, 
                 params=(symbol, start_date, end_date)
             )
+            
+            original_size = len(df)
+            self.logger.debug(f"取得した生データのサイズ: {original_size}行")
+            
+            # 無効なデータを除外: 株価が0または欠損値である行
+            if not df.empty:
+                # 無効なデータをフィルタリング
+                df = df[df['close'] > 0]  # 終値が0より大きい行のみ残す
+                df = df.dropna(subset=['open', 'high', 'low', 'close', 'volume'])  # 欠損値を含む行を削除
+                
+                filtered_size = len(df)
+                if original_size > filtered_size:
+                    self.logger.warning(f"銘柄 {symbol}: 無効なデータ（株価が0または欠損値）を {original_size - filtered_size} 行除外しました")
+                
+                # フィルタリング後のデータサイズをログ出力
+                self.logger.debug(f"フィルタリング後のデータサイズ: {filtered_size}行")
+            
             return df
 
         except Exception as e:

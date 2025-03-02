@@ -7,9 +7,10 @@ import time  # リトライ用に追加
 import logging
 
 class ApiHandler:
-    def __init__(self, data, backtest_results=None):
+    def __init__(self, data, backtest_results=None, logger=None):
         self.data = data
         self.backtest_results = backtest_results or []
+        self.logger = logger if logger else logging.getLogger()
 
     def get_prompt(self):
         # Decimal 型の値を float に変換するヘルパー関数
@@ -133,13 +134,12 @@ class ApiHandler:
         return content
 
     def call_gemini_api(self):
-        print("call_gemini_api() started")
         print("Calling Gemini API")
         api_key = os.environ.get("GEMINI_API_KEY")  # 環境変数からAPIキーを取得
         if not api_key:
             print("Error: GEMINI_API_KEY environment variable not set.")
             return "API key not set"  # APIキーがない場合はエラーメッセージを返す
-        model = os.environ.get("GEMINI_MODEL")  # 環境変数からモデル名を取得
+        model = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")  # 環境変数からモデル名を取得、デフォルト値を設定
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         prompt = self.get_prompt() # getPrompt関数でプロンプトを生成
         payload = {
@@ -166,17 +166,13 @@ class ApiHandler:
                     continue
                 response.raise_for_status()
                 json_response = response.json()
-                # print("API response:", json_response)
-                
-                # Gemini APIからのレスポンスを処理します
-                # if json_response and 'candidates' in json_response and json_response['candidates']:
-                #     content = json_response['candidates'][0]['content']['parts']['text']
+
                 try:
                     # usageMetadataからトークン情報をログ出力する
                     usage = json_response.get("usageMetadata", {})
-                    logging.info("入力トークン(promptTokenCount): %s", usage.get("promptTokenCount", "不明"))
-                    logging.info("候補トークン(candidatesTokenCount): %s", usage.get("candidatesTokenCount", "不明"))
-                    logging.info("合計トークン(totalTokenCount): %s", usage.get("totalTokenCount", "不明"))
+                    self.logger.info("入力トークン(promptTokenCount): %s", usage.get("promptTokenCount", "不明"))
+                    self.logger.info("候補トークン(candidatesTokenCount): %s", usage.get("candidatesTokenCount", "不明"))
+                    self.logger.info("合計トークン(totalTokenCount): %s", usage.get("totalTokenCount", "不明"))
                     content = json_response['candidates'][0]['content']['parts'][0]['text']
                     json_text = self._extract_json(content)
                     return json_text
@@ -193,6 +189,9 @@ class ApiHandler:
                     continue
                 else:
                     print(f"Gemini API call failed: {e}, request: {e.request}, response: {e.response}")
+                    self.logger.error(f"Gemini API呼び出しエラー: {e}")
+                    self.logger.error(f"API URL: {api_url}")
+                    self.logger.error(f"使用モデル: {model}")
                     return f"Gemini API call failed: {e}"
         return {"error": "Failed after multiple retries due to 503 response."}
     

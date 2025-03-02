@@ -166,7 +166,7 @@ class StockRepository(BaseRepository):
         """
         try:
             # 環境変数から取得日数を取得
-            fetch_range = os.getenv("FETCH_DATA_RANGE", "1")  # 範囲は年数。デフォルトは1年
+            fetch_range = int(os.getenv("FETCH_DATA_RANGE", "1"))*230  # 範囲は年数。デフォルトは1年*230営業日
             
             query = """
             WITH price_data AS (
@@ -174,7 +174,7 @@ class StockRepository(BaseRepository):
                 FROM {}_price p
                 LEFT JOIN {}_indicator i ON p.code = i.code AND p.date = i.date
                 WHERE p.code = %s
-                AND p.date BETWEEN (CURRENT_DATE - (%s || ' years')::interval) AND CURRENT_DATE
+                AND p.date BETWEEN (CURRENT_DATE - (%s || ' days')::interval) AND CURRENT_DATE
                 ORDER BY p.date DESC
             )
             SELECT * FROM price_data ORDER BY date ASC;
@@ -260,7 +260,7 @@ class StockRepository(BaseRepository):
                 self.reconnect()
             
             # 環境変数から取得日数を取得
-            fetch_range = os.getenv("CALC_INDICATOR_RANGE", "1")  # 範囲は年数。デフォルトは1年
+            fetch_range = int(os.getenv("FETCH_DATA_RANGE", "1"))*230  # 範囲は年数。デフォルトは1年*230営業日
             
             query = """
             SELECT code, date, open, high, low, close, volume
@@ -942,6 +942,7 @@ class StockRepository(BaseRepository):
             self.logger.error(f"最新インジケーター取得エラー（コード: {code}）: {str(e)}")
             return []
 
+
     def get_sector_stock_prices(self, sector_table: str, days: int = 90) -> Dict[str, List[Dict]]:
         try:
             query = f"""
@@ -973,50 +974,134 @@ class StockRepository(BaseRepository):
             self.logger.error(f"セクター株価データ取得エラー: {e}")
             return {}
 
-    def get_latest_price(self, code: str, table_prefix: str) -> Optional[Dict]:
+    def get_latest_price(self, code: str, industry_name: str) -> Optional[Dict]:
         """
-        指定された銘柄の最新の株価データを取得します
+        指定された銘柄の最新の株価情報を取得します
         
         Args:
             code (str): 銘柄コード
-            industry_name (str): 業種名
+            industry_name (str): 業種名（英語のテーブル接頭辞）
             
         Returns:
-            Optional[Dict]: 最新の株価データ、データがない場合はNone
+            Optional[Dict]: 最新の株価情報、データがない場合はNone
         """
         try:
-            # 最新の株価データを取得するクエリ
+            # 業種名は既に英語のテーブル接頭辞として扱う
+            table_prefix = industry_name
             query = f"""
-            SELECT date, open, high, low, close, volume
-            FROM {table_prefix}_price
-            WHERE code = %s
-            ORDER BY date DESC
-            LIMIT 1
+            SELECT * FROM {table_prefix}_price 
+            WHERE code = %s 
+            ORDER BY date DESC 
+            LIMIT 1;
             """
-            
             self.cur.execute(query, (code,))
             result = self.cur.fetchone()
             
-            if not result:
-                logging.warning(f"銘柄の最新株価データが見つかりません: {code}")
-                return None
-                
-            # 結果を辞書形式に変換
-            price_data = {
-                'date': result[0],
-                'open': float(result[1]),
-                'high': float(result[2]),
-                'low': float(result[3]),
-                'close': float(result[4]),
-                'volume': int(result[5])
-            }
+            if result:
+                return {
+                    'date': result[1],
+                    'open': float(result[2]),
+                    'high': float(result[3]),
+                    'low': float(result[4]),
+                    'close': float(result[5]),
+                    'volume': int(result[6])
+                }
+            return None
+        except Exception as e:
+            logging.error(f"最新の株価情報取得エラー: {e}")
+            return None
+
+    def get_average_volume(self, code: str, industry_name: str, days: int = 20) -> float:
+        """
+        指定した銘柄の過去n日間の平均出来高を計算します
+        
+        Args:
+            code (str): 銘柄コード (4桁)
+            industry_name (str): 業種名（英語のテーブル接頭辞）
+            days (int): 計算対象日数 (デフォルト: 20日)
             
-            return price_data
+        Returns:
+            float: 平均出来高。データがない場合は0を返します。
+        """
+        try:
+            # 業種名は既に英語のテーブル接頭辞として扱う
+            table_prefix = industry_name
+            query = f"""
+            SELECT volume FROM {table_prefix}_price 
+            WHERE code = %s 
+            ORDER BY date DESC 
+            LIMIT %s;
+            """
+            self.cur.execute(query, (code, days))
+            results = self.cur.fetchall()
+            
+            if not results:
+                return 0
+                
+            volumes = [int(row[0]) for row in results]
+            avg_volume = sum(volumes) / len(volumes)
+            return avg_volume
             
         except Exception as e:
-            logging.error(f"最新株価データの取得中にエラーが発生しました: {e}")
-            return None
+            logging.error(f"平均出来高計算エラー: code={code}, industry_name={industry_name}, error={e}")
+            return 0
             
+    def check_price_limit_days(self, code: str, industry_name: str) -> int:
+        """
+        指定した銘柄のストップ高・ストップ安が連続している日数を確認します
+        
+        Args:
+            code (str): 銘柄コード (4桁)
+            industry_name (str): 業種名（英語のテーブル接頭辞）
+            
+        Returns:
+            int: ストップ高・ストップ安が連続している日数。連続していない場合は0を返します。
+        """
+        try:
+            # 業種名は既に英語のテーブル接頭辞として扱う
+            table_prefix = industry_name
+            
+            # 最新の5営業日分の株価データを取得
+            query = f"""
+            SELECT date, open, high, low, close 
+            FROM {table_prefix}_price 
+            WHERE code = %s 
+            ORDER BY date DESC 
+            LIMIT 5;
+            """
+            self.cur.execute(query, (code,))
+            results = self.cur.fetchall()
+            
+            if not results or len(results) < 2:
+                return 0
+                
+            # ストップ高・ストップ安の判定基準
+            # 前日比±30%以上の変動があった場合をストップ高・ストップ安とみなす
+            consecutive_days = 0
+            
+            for i in range(len(results) - 1):
+                current_day = results[i]
+                prev_day = results[i + 1]
+                
+                current_close = float(current_day[4])  # close
+                prev_close = float(prev_day[4])    # close
+                
+                # 前日比の変化率を計算
+                change_rate = abs(current_close - prev_close) / prev_close
+                
+                # 30%以上の変動があるかチェック
+                if change_rate >= 0.3:
+                    consecutive_days += 1
+                else:
+                    # 連続していない場合はここで終了
+                    break
+                    
+            return consecutive_days
+                
+        except Exception as e:
+            logging.error(f"ストップ高・ストップ安チェックエラー: code={code}, industry_name={industry_name}, error={e}")
+            return 0
+
     def get_stock_price_data(self, code: str, industry_name: str, start_date: str = None, end_date: str = None) -> List[Dict]:
         """
         指定された銘柄の株価データを取得します

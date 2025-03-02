@@ -2,6 +2,7 @@ import glob
 import os
 import sys
 import time
+import traceback
 from lib.tachibana_stock_api_base import TachibanaStockAPI
 import logging
 from datetime import datetime
@@ -14,8 +15,8 @@ def main():
     
     # tachibana_stock_api_base のロガーレベルを設定
     api_logger = logging.getLogger('lib.tachibana_stock_api_base')
-    api_logger.setLevel(logging.WARNING)  # DEBUGやINFOレベルのログを抑制
-
+    api_logger.setLevel(logging.INFO)  # INFOレベル以上のログを表示
+    
     # コマンドライン引数から開始コードを取得
     start_code = sys.argv[1] if len(sys.argv) > 1 else None
     
@@ -23,29 +24,24 @@ def main():
         logger.info(f"開始コード: {start_code}")
     
     try:
-        # APIクライアントの初期化
-        api = TachibanaStockAPI()
+        # APIクライアントの初期化 - loggerを渡す
+        api = TachibanaStockAPI(logger=logger)
         
-        # ログイン
+        # ログインと株価取得を実行
         logger.info("立花証券APIにログインします")
-        login_result = api.login()
+        try:
+            api.execute_stock_price_retrieval(start_code)
+            logger.info("API処理が完了しました")
+        except AttributeError as ae:
+            logger.error(f"メソッド呼び出しエラー: {ae}")
+            logger.error(f"詳細: {traceback.format_exc()}")
+        except Exception as inner_e:
+            logger.error(f"API処理中のエラー: {inner_e}")
+            logger.error(f"スタックトレース: {traceback.format_exc()}")
         
-        if login_result:
-            logger.info("ログイン成功")
-            
-            # 銘柄情報の取得
-            if start_code:
-                stock_info = api.get_stock_info(start_code)
-                logger.info(f"銘柄情報: {stock_info}")
-            
-            # ログアウト
-            logger.info("ログアウトします")
-            api.logout()
-        else:
-            logger.error("ログインに失敗しました")
-    
     except Exception as e:
         logger.error(f"エラーが発生しました: {e}")
+        logger.error(f"詳細なエラー情報: {traceback.format_exc()}")
     
     logger.info("立花証券APIテストを終了します")
 
@@ -55,10 +51,11 @@ def test_single_stock():
     cleanup_old_logs("tachibana")
     
     try:
-        api = TachibanaStockAPI(num_threads=1)
+        api = TachibanaStockAPI(num_threads=1, logger=logger)  # loggerを渡す
         api.execute_stock_price_retrieval(start_code="1301")  # 極洋を対象にテスト
     except Exception as e:
         logger.error(f"テスト実行中にエラーが発生しました: {str(e)}")
+        logger.error(f"詳細: {traceback.format_exc()}")
         sys.exit(1)
 
 if __name__ == "__main__":

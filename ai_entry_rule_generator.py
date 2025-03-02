@@ -13,21 +13,34 @@ from utils.logging_config import setup_logging, cleanup_old_logs
 
 # グローバル変数で停止フラグを管理
 stop_processing = False
+# グローバルロガー変数
+logger = None
 
 # シグナルハンドラ関数
 def signal_handler(sig, frame):
-    global stop_processing
+    global stop_processing, logger
     print("\nCtrl+C が押されました。処理を安全に停止します...")
-    logging.info("ユーザーによる中断シグナルを受信しました。処理を停止します。")
+    if logger:
+        logger.info("ユーザーによる中断シグナルを受信しました。処理を停止します。")
+    else:
+        print("ユーザーによる中断シグナルを受信しました。処理を停止します。")
+    
     stop_processing = True
     # .envファイルに停止フラグを設定
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     set_key(dotenv_path, "STOP_GEMINI_FLAG", "y")
-    logging.info("停止フラグを設定しました。現在の処理が完了次第、プログラムは終了します。")
+    
+    if logger:
+        logger.info("停止フラグを設定しました。現在の処理が完了次第、プログラムは終了します。")
+    else:
+        print("停止フラグを設定しました。現在の処理が完了次第、プログラムは終了します。")
 
 if __name__ == "__main__":
     # 環境変数を確実に読み込む
     load_dotenv(override=True)
+    
+    # ロギングの設定
+    logger = setup_logging("entryRule")
     
     # シグナルハンドラを設定
     signal.signal(signal.SIGINT, signal_handler)
@@ -36,8 +49,6 @@ if __name__ == "__main__":
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     set_key(dotenv_path, "STOP_GEMINI_FLAG", "false")
     
-    # ロギングの設定
-    logger = setup_logging("entryRule")
     logger.info("AIエントリールール生成処理を開始します")
     
     # 休日判定
@@ -46,6 +57,6 @@ if __name__ == "__main__":
         sys.exit(0)
     
     # AIルール生成処理を実行
-    run_ai_rule_generation(logger)
+    run_ai_rule_generation(logger=logger)
     
     logger.info("AIエントリールール生成処理が完了しました")
