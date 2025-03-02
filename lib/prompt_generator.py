@@ -41,6 +41,14 @@ class PromptGenerator:
         Returns:
             str: 生成されたプロンプト
         """
+        # 最新のADX値をログに出力
+        latest_data = technical_data[-1] if technical_data else {}
+        
+        # ADX値をログに出力（デバッグ用）
+        adx_value = latest_data.get('adx')
+        self.logger.debug(f"最新のADX値: {adx_value}")
+        print(f"DEBUG - プロンプトに含まれるADX値: {adx_value}")
+        
         # 基本的な銘柄情報
         stock_code = stock_data.get('code', 'unknown')
         company_name = stock_data.get('company_name', 'unknown')
@@ -60,16 +68,34 @@ class PromptGenerator:
 """
 
         # 直近3日分の重要な指標を抽出（少ないデータ量で効果的な情報を提供）
-        recent_data = technical_data[-3:] if len(technical_data) >= 3 else technical_data
+        recent_data = technical_data[-5:] if len(technical_data) >= 5 else technical_data
+        
+        # 技術指標の説明
+        prompt += f"""
+## 技術指標の説明
+- **RSI (相対力指数)**: 0〜100の値。70以上は買われすぎ、30以下は売られすぎを示す。
+- **ストキャスティクス %K**: 0〜100の値。80以上は買われすぎ、20以下は売られすぎを示す。
+- **ADX (平均方向性指数)**: トレンドの強さを示す。25以上で強いトレンド、15以下で弱いトレンドを示す。
+- **MACD**: 短期と長期の移動平均線の差。上向きならば上昇トレンド、下向きならば下降トレンドを示す。
+- **ボリンジャーバンド**: 上下2σ（標準偏差）のバンドと中央移動平均線。価格がバンド外に出ると反転の可能性。
+- **一目均衡表**: 日本発の複合指標。転換線・基準線のクロスや雲（先行スパンA/B間）の位置関係でトレンドを判断。
+- **ATR (平均真価格範囲)**: ボラティリティの指標。高値は大きな値動き、低値は小さな値動きを示す。
+"""
+
+        # 直近5日分の詳細データを表示
         for idx, day_data in enumerate(reversed(recent_data)):
             day_num = idx + 1
             date = day_data.get('date', '不明')
             prompt += f"""
 ### {day_num}日前 ({date})
-- 終値: {day_data.get('close', 0)}円
-- RSI: {day_data.get('rsi', 0):.1f}
-- ストキャスティクス %K: {day_data.get('stoch_k', 0):.1f}
-- ADX: {day_data.get('adx', 0):.1f}
+- **価格**: 始値={day_data.get('open', 0):.1f}円, 高値={day_data.get('high', 0):.1f}円, 安値={day_data.get('low', 0):.1f}円, 終値={day_data.get('close', 0):.1f}円
+- **RSI**: {day_data.get('rsi', 0):.1f}
+- **ストキャスティクス**: %K={day_data.get('stoch_k', 0):.1f}, %D={day_data.get('stoch_d', 0):.1f}
+- **ADX**: {day_data.get('adx', 0):.1f}
+- **MACD**: {day_data.get('macd', 0):.2f}
+- **ボリンジャーバンド**: 下={day_data.get('bb_lower', 0):.1f}, 中={day_data.get('bb_middle', 0):.1f}, 上={day_data.get('bb_upper', 0):.1f}
+- **一目均衡表**: 転換線={day_data.get('ichimoku_tenkan', 0):.1f}, 基準線={day_data.get('ichimoku_kijun', 0):.1f}, 先行スパンA={day_data.get('ichimoku_senkou_a', 0):.1f}, 先行スパンB={day_data.get('ichimoku_senkou_b', 0):.1f}
+- **ATR**: {day_data.get('atr', 0):.2f}
 """
 
         # バックテスト結果のサマリー
@@ -129,15 +155,37 @@ class PromptGenerator:
         rsi = stock_data.get('rsi', None)
         stoch_k = stock_data.get('stoch_k', None)
         adx = stock_data.get('adx', None)
+        macd = stock_data.get('macd', None)
+        bb_lower = stock_data.get('bb_lower', None)
+        bb_middle = stock_data.get('bb_middle', None)
+        bb_upper = stock_data.get('bb_upper', None)
+        ichimoku_tenkan = stock_data.get('ichimoku_tenkan', None)
+        ichimoku_kijun = stock_data.get('ichimoku_kijun', None)
+        ichimoku_senkou_a = stock_data.get('ichimoku_senkou_a', None)
+        ichimoku_senkou_b = stock_data.get('ichimoku_senkou_b', None)
+        atr = stock_data.get('atr', None)
         
         # 簡略化したプロンプトを構築
         prompt = f"""
 銘柄コード {stock_code}、現在価格 {current_price}円、事前スコア {entry_score:.1f}/100の株式エントリー判断
 
+技術指標の説明:
+- RSI: 0〜100の値。70以上は買われすぎ、30以下は売られすぎ
+- ストキャスティクス: 0〜100の値。80以上は買われすぎ、20以下は売られすぎ
+- ADX: 25以上で強いトレンド、15以下で弱いトレンド
+- MACD: 短期と長期の移動平均線の差。上向きは上昇トレンド、下向きは下降トレンド
+- ボリンジャーバンド: 価格がバンド外に出ると反転の可能性
+- 一目均衡表: 転換線・基準線のクロスやスパン間の位置でトレンドを判断
+
 最新の主要指標:
 - RSI: {rsi if rsi is not None else '不明'}
 - ストキャスティクス %K: {stoch_k if stoch_k is not None else '不明'}
 - ADX: {adx if adx is not None else '不明'}
+- MACD: {macd if macd is not None else '不明'}
+- ボリンジャーバンド: 下={bb_lower if bb_lower is not None else '不明'}, 中={bb_middle if bb_middle is not None else '不明'}, 上={bb_upper if bb_upper is not None else '不明'}
+- 一目均衡表: 転換線={ichimoku_tenkan if ichimoku_tenkan is not None else '不明'}, 基準線={ichimoku_kijun if ichimoku_kijun is not None else '不明'}
+          先行スパンA={ichimoku_senkou_a if ichimoku_senkou_a is not None else '不明'}, 先行スパンB={ichimoku_senkou_b if ichimoku_senkou_b is not None else '不明'}
+- ATR: {atr if atr is not None else '不明'}
 
 この銘柄は購入すべきですか？理由と共に回答してください。
 以下のJSON形式で回答:

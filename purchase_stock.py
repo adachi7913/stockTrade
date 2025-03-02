@@ -41,7 +41,7 @@ class StockPurchaseManager:
     このクラスは同期処理を使用して、データ取得と処理を実現します。
     """
     
-    def __init__(self, max_ai_calls=5, min_entry_score=70.0, api_delay=60):
+    def __init__(self, max_ai_calls=5, min_entry_score=70.0, api_delay=60, test_mode=False):
         """
         初期化処理
         
@@ -55,6 +55,7 @@ class StockPurchaseManager:
             max_ai_calls (int): 一回の処理で最大何件のAI判断を行うか
             min_entry_score (float): エントリースコアの最低値（これ以下の候補はAI判断を行わない）
             api_delay (int): AI API呼び出し間の待機時間（秒）
+            test_mode (bool): テストモードを有効にするかどうか
         """
         load_dotenv()
         self.entry_repository = EntryRepository()
@@ -62,7 +63,6 @@ class StockPurchaseManager:
             api_key=os.getenv('GEMINI_API_KEY'),
             logger=logger
         )
-        self.browser_handler = EntryBrowserUse(logger=logger)
         self.logger = logger
         
         # 新しい設定パラメータ
@@ -71,7 +71,16 @@ class StockPurchaseManager:
         self.api_delay = api_delay
         
         # テストモード（実際の購入処理をスキップ）
-        self.test_mode = False
+        # 引数とコマンドライン引数と環境変数から設定を読み込む
+        self.test_mode = test_mode or os.getenv('STOCK_TEST_MODE', 'false').lower() == 'true'
+        
+        if self.test_mode:
+            self.logger.info("テストモードが有効です。実際の購入処理はスキップされます。")
+            # テストモードの場合はブラウザ操作クラスの初期化をスキップ
+            self.browser_handler = None
+        else:
+            # 通常モードの場合はブラウザ操作クラスを初期化
+            self.browser_handler = EntryBrowserUse(logger=logger)
         
         # プロンプト生成器を初期化
         self.prompt_generator = PromptGenerator()
@@ -175,8 +184,26 @@ class StockPurchaseManager:
         try:
             self.logger.info(f"{stock_code}: バックテスト実行開始")
             
+            # 企業情報を取得して業種名を特定
+            stock_util = StockUtil()
+            five_digit_code = f"{stock_code}0"  # 末尾に0を追加
+            company_info = stock_util.get_company_info(five_digit_code)
+            if not company_info:
+                self.logger.error(f"企業情報が見つかりません: {stock_code} (5桁コード: {five_digit_code})")
+                return {}
+
+            # 業種名を取得（company_infoの5番目の要素が業種名）
+            japanese_industry_name = company_info[5]
+            
+            try:
+                # 日本語の業種名を英語に変換
+                industry_name = TableCategory.get_table_prefix(japanese_industry_name)
+            except ValueError as e:
+                self.logger.error(f"業種名の変換に失敗: {japanese_industry_name}, エラー: {e}")
+                return {}
+            
             # バックテスト実行
-            backtest_results = run_multiple_backtests(str(stock_code))
+            backtest_results = run_multiple_backtests(str(stock_code), industry_name)
             
             if not backtest_results:
                 self.logger.warning(f"{stock_code}: バックテスト結果が取得できませんでした")
@@ -193,6 +220,31 @@ class StockPurchaseManager:
                 strategy = result.get("strategy", "unknown")
                 trades = result.get("trades", [])
                 
+                # トレード情報に profit キーが存在しない場合は計算して追加
+                for trade in trades:
+                    try:
+                        if "profit" not in trade:
+                            if "entry_price" in trade and "exit_price" in trade and "lot" in trade:
+                                entry_price = float(trade["entry_price"])
+                                exit_price = float(trade["exit_price"])
+                                lot = float(trade["lot"])
+                                trade["profit"] = (exit_price - entry_price) * lot
+                                self.logger.debug(f"profitキーを計算して追加: entry={entry_price}, exit={exit_price}, lot={lot}, profit={trade['profit']}")
+                            else:
+                                # entry_priceかexit_priceが欠けている場合はprofitを0に設定
+                                missing_keys = []
+                                if "entry_price" not in trade:
+                                    missing_keys.append("entry_price")
+                                if "exit_price" not in trade:
+                                    missing_keys.append("exit_price")
+                                if "lot" not in trade:
+                                    missing_keys.append("lot")
+                                self.logger.warning(f"トレード情報に必要なキーが欠けているため、profitを0に設定します: {', '.join(missing_keys)}")
+                                trade["profit"] = 0
+                    except Exception as e:
+                        self.logger.error(f"profitの計算中にエラーが発生: {e}")
+                        trade["profit"] = 0
+                
                 # その戦略のサマリーを初期化
                 if strategy not in strategy_summary:
                     strategy_summary[strategy] = {
@@ -204,9 +256,9 @@ class StockPurchaseManager:
                     }
                 
                 # 取引情報を集計
-                win_count = sum(1 for trade in trades if trade["profit"] > 0)
-                loss_count = sum(1 for trade in trades if trade["profit"] <= 0)
-                total_strategy_profit = sum(trade["profit"] for trade in trades)
+                win_count = sum(1 for trade in trades if "profit" in trade and trade["profit"] > 0)
+                loss_count = sum(1 for trade in trades if "profit" in trade and trade["profit"] <= 0)
+                total_strategy_profit = sum(trade.get("profit", 0) for trade in trades)
                 trade_count = len(trades)
                 
                 # 戦略サマリーを更新
@@ -314,6 +366,15 @@ class StockPurchaseManager:
         for candidate in candidates:
             stock_code = candidate.get('code')
             
+            # 文字列型のデータを数値型に変換
+            try:
+                # closeが文字列の場合は数値に変換
+                if 'close' in candidate and isinstance(candidate['close'], str):
+                    candidate['close'] = float(candidate['close'])
+            except (ValueError, TypeError) as e:
+                self.logger.error(f"{stock_code}: 数値変換エラー: {e}")
+                continue
+            
             # 過去データの取得
             historical_data = self._get_historical_data(stock_code)
             if not historical_data:
@@ -327,6 +388,10 @@ class StockPurchaseManager:
             backtest_results = self._get_backtest_results(stock_code)
             if not backtest_results:
                 self.logger.warning(f"{stock_code}: バックテスト結果が取得できないためスコアを下げます")
+            
+            # プロンプト生成前の最新技術指標データを確認
+            self.logger.debug(f"AI判断前の最新技術指標データ: {latest_data}")
+            self.logger.debug(f"ADX値: {latest_data.get('adx', 'データなし')}")
             
             # スコアを計算
             entry_score = calculate_entry_score(
@@ -398,17 +463,10 @@ class StockPurchaseManager:
                 self.logger.info("エントリー候補が見つかりませんでした")
                 return False
             self.logger.info(f"取得完了: {len(candidates)}件のエントリー候補")
-            
-            # 2. 基本フィルタリング
-            self.logger.info("基本フィルタリングを実行")
-            filtered_candidates = self._filter_candidates(candidates)
-            if not filtered_candidates:
-                self.logger.info("フィルタリング後の候補がありません")
-                return False
-            
-            # 3. 候補にスコアを付け、上位候補を選択
+
+            # 2. 候補にスコアを付け、上位候補を選択
             self.logger.info("候補のスコアリングを実行")
-            scored_candidates = self._score_candidates(filtered_candidates)
+            scored_candidates = self._score_candidates(candidates)
             
             self.logger.info("上位候補の選択")
             top_candidates = self._select_top_candidates(
@@ -447,6 +505,11 @@ class StockPurchaseManager:
                         technical_data=historical_data[-10:] if len(historical_data) >= 10 else historical_data,
                         entry_score=entry_score
                     )
+                
+                # プロンプト生成前の最新技術指標データを確認
+                latest_data = historical_data[-1] if historical_data else {}
+                self.logger.debug(f"AI判断前の最新技術指標データ: {latest_data}")
+                self.logger.debug(f"ADX値: {latest_data.get('adx', 'データなし')}")
                 
                 # API呼び出し間隔を調整
                 if idx > 0:
@@ -495,7 +558,16 @@ class StockPurchaseManager:
                     self.logger.info(f"テストモード: 候補 {stock_code} の実際の購入処理をスキップします")
                     # テストモードでもエントリー成功とみなす
                     any_success = True
+                    
+                    # テストモードでもエントリー情報を保存（テスト用のフラグ付き）
+                    candidate['is_test'] = True
+                    self.entry_repository.save_entry_info(candidate)
                 else:
+                    # ブラウザ操作クラスが初期化されていない場合はエラーを出力
+                    if self.browser_handler is None:
+                        self.logger.error(f"ブラウザ操作クラスが初期化されていません。候補 {stock_code} のエントリーをスキップします。")
+                        continue
+                        
                     success = self.browser_handler.execute_entry(candidate)
                     if success:
                         # エントリー情報を保存
@@ -520,13 +592,19 @@ def main():
     parser.add_argument('--max-calls', type=int, default=5, help='一回の処理で最大何件のAI判断を行うか（デフォルト: 5）')
     parser.add_argument('--min-score', type=float, default=70.0, help='エントリースコアの最低値（デフォルト: 70.0）')
     parser.add_argument('--api-delay', type=int, default=60, help='AI API呼び出し間の待機時間（秒、デフォルト: 60）')
+    parser.add_argument('--test-mode', action='store_true', help='テストモードを有効にする（実際の購入処理をスキップ）')
     args = parser.parse_args()
 
     manager = StockPurchaseManager(
         max_ai_calls=args.max_calls,
         min_entry_score=args.min_score,
-        api_delay=args.api_delay
+        api_delay=args.api_delay,
+        test_mode=args.test_mode
     )
+    
+    # テストモードの設定（環境変数からの読み込みはコンストラクタ内で行われる）
+    if args.test_mode:
+        logger.info("コマンドライン引数によりテストモードが有効化されました")
     
     success = manager.execute_purchase()
     if success:

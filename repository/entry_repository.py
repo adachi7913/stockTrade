@@ -4,12 +4,13 @@ from datetime import datetime, date
 from .base_repository import BaseRepository
 
 class EntryRepository(BaseRepository):
-    def fetch_best_entry_candidates(self, min_score: int = 650) -> List[Dict]:
+    def fetch_best_entry_candidates(self, min_score: int = 650, limit: int = 10) -> List[Dict]:
         """
-        エントリースコアが指定値以上のデータを期待リターンの降順で取得します
+        エントリースコアが指定値以上のデータを一日辺りの期待リターンの降順で取得します
         
         Args:
             min_score (int): 最小エントリースコア（デフォルト: 650）
+            limit (int): 取得する最大件数（デフォルト: 10）
             
         Returns:
             List[Dict]: エントリー候補のリスト
@@ -24,6 +25,15 @@ class EntryRepository(BaseRepository):
                     self.logger.error(f"環境変数MIN_ENTRY_SCOREの値が数値に変換できません: {env_min_score}. デフォルト値650を使用します。")
                     min_score = 650
 
+            # 環境変数 ENTRY_CANDIDATE_LIMIT が設定されている場合、その値を使用（int変換）
+            env_limit = os.getenv("ENTRY_CANDIDATE_LIMIT")
+            if env_limit is not None:
+                try:
+                    limit = int(env_limit)
+                except ValueError:
+                    self.logger.error(f"環境変数ENTRY_CANDIDATE_LIMITの値が数値に変換できません: {env_limit}. デフォルト値10を使用します。")
+                    limit = 10
+
             query = """
             SELECT 
                 code, date, close, rule_entry_price, rule_stop_limit,
@@ -31,10 +41,15 @@ class EntryRepository(BaseRepository):
                 expected_return, reason
             FROM api_response
             WHERE entry_score >= %s
-            ORDER BY expected_return DESC;
+            ORDER BY CASE 
+                WHEN rule_period ~ E'^\\d+$' AND CAST(rule_period AS INTEGER) > 0 
+                THEN CAST(expected_return AS NUMERIC) / CAST(rule_period AS INTEGER) 
+                ELSE 0 
+            END DESC
+            LIMIT %s;
             """
             
-            self.cur.execute(query, (min_score,))
+            self.cur.execute(query, (min_score, limit))
             rows = self.cur.fetchall()
             
             return [{
