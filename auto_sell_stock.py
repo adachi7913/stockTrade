@@ -16,6 +16,7 @@ from typing import List, Dict, Optional, Tuple
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
+import traceback
 
 from repository.entry_repository import EntryRepository
 from repository.stock_repository import StockRepository
@@ -34,24 +35,27 @@ class AutoSellStock:
     """
     保有銘柄の自動売却を行うクラス
     """
-    def __init__(self, test_mode: bool = False):
+    def __init__(self, test_mode: bool = False, logger=None):
         """
         初期化
         
         Args:
             test_mode (bool): テスト実行モードかどうか
+            logger (logging.Logger, optional): 使用するロガー。指定がなければ新しいロガーを設定
         """
         self.entry_repository = EntryRepository()
         self.stock_repository = StockRepository()
         self.backtest_service = BacktestService()
+        
+        # ロガーの設定
+        self.logger = logger if logger else setup_logging("auto_sell_stock")
         
         # Gemini APIキーの取得
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("環境変数 GEMINI_API_KEY が設定されていません")
             
-        self.entry_judgment = EntryJudgmentHandler(api_key=api_key, logger=logger)
-        self.logger = logging.getLogger(__name__)
+        self.entry_judgment = EntryJudgmentHandler(api_key=api_key, logger=self.logger)
         self.test_mode = test_mode
         self.test_results = []  # テストモード時の結果を保存するリスト
         
@@ -571,7 +575,11 @@ class AutoSellStock:
             self.logger.error(f"テストレポート保存中にエラー: {e}", exc_info=True)
             
 def main():
-    """メイン関数"""
+    # ロギング設定
+    logger = setup_logging("auto_sell_stock")
+    logger.info("自動売却処理を開始します")
+    
+    # コマンドライン引数の解析
     parser = argparse.ArgumentParser(description='自動売却処理')
     parser.add_argument('--debug', action='store_true', help='デバッグモードで実行')
     parser.add_argument('--test', '-t', action='store_true', help='テスト実行モード（売却処理を実行せずシミュレーションのみ）')
@@ -583,37 +591,34 @@ def main():
     
     # デバッグモードの設定
     if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
+        # ルートロガーのレベルを変更するのではなく、個別のロガーのレベルを変更
+        logger.setLevel(logging.DEBUG)
+        # 関連するモジュールのロガーも設定
+        logging.getLogger('repository').setLevel(logging.DEBUG)
+        logging.getLogger('service').setLevel(logging.DEBUG)
+        logging.getLogger('lib').setLevel(logging.DEBUG)
         logger.debug("デバッグモードが有効化されました")
         
     try:
         # 自動売却処理の実行
-        auto_sell = AutoSellStock(test_mode=args.test)
+        auto_sell = AutoSellStock(test_mode=args.test, logger=logger)
         logger.debug(f"AutoSellStockインスタンス生成: test_mode={args.test}")
         
         run_result = auto_sell.run()
         logger.debug(f"run()メソッド実行完了: 結果={run_result}")
         
-        # テストモードの場合、テスト結果内容も出力
-        if args.test:
-            test_results_count = len(auto_sell.test_results)
-            logger.debug(f"テスト結果データ: {test_results_count}件")
-            if test_results_count > 0:
-                # テスト結果の一覧を簡潔にログ出力
-                codes = [r['code'] for r in auto_sell.test_results]
-                logger.debug(f"テスト結果銘柄: {', '.join(codes)}")
-        
-        # テストモードの場合、レポートを保存
+        # テストモードでレポート出力オプションがある場合
         if args.test and args.output:
-            logger.debug(f"テストレポート保存開始 (指定ファイル: {args.output})")
             auto_sell.save_test_report(args.output)
-        elif args.test:
-            logger.debug("テストレポート保存開始 (自動ファイル名)")
-            auto_sell.save_test_report()
-        
+            logger.info(f"テストレポートを保存しました: {args.output}")
+            
     except Exception as e:
-        logger.error(f"実行中にエラーが発生しました: {e}", exc_info=True)
-        sys.exit(1)
+        logger.error(f"処理中にエラーが発生しました: {e}")
+        logger.error(traceback.format_exc())
+        return 1
+        
+    logger.info("自動売却処理を終了します")
+    return 0
         
 if __name__ == "__main__":
     main() 

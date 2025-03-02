@@ -243,22 +243,15 @@ def func_make_url_request(auth_flg, \
 # 第１引数： URL文字列。
 # 備考: APIに接続し、requestの文字列を送信し、応答データを辞書型で返す。
 #       master取得は専用の func_api_req_muster を利用する。
-def func_api_req(str_url): 
-    # print('送信文字列＝')
-    # print(str_url)  # 送信する文字列
-
+def func_api_req(str_url):
     # APIに接続
     http = urllib3.PoolManager()
     req = http.request('GET', str_url)
-    print("req.status= ", req.status )
-
+    
     # 取得したデータを、json.loadsを利用できるようにstr型に変換する。日本語はshift-jis。
     bytes_reqdata = req.data
     str_shiftjis = bytes_reqdata.decode("shift-jis", errors="ignore")
-
-    # print('返信文字列＝')
-    # print(str_shiftjis)
-
+    
     # JSON形式の文字列を辞書型で取り出す
     json_req = json.loads(str_shiftjis)
 
@@ -552,11 +545,13 @@ def func_logout(int_p_no, class_cust_property):
 # 引数2: 銘柄コード
 # 引数3: 市場（現在、東証'00'のみ）
 # 引数4: 口座属性クラス
+# 引数5: logger（オプション）- ロギング用のロガーインスタンス
 # 備考: 銘柄コードは、通常銘柄、4桁。優先株等、5桁。例、伊藤園'2593'、伊藤園優先株'25935'
 def func_get_daily_price(int_p_no,
                         str_sIssueCode,
                         str_sSizyouC,
-                        class_cust_property
+                        class_cust_property,
+                        logger=None
                         ):
     # 送信項目の解説は、マニュアル「立花証券・ｅ支店・ＡＰＩ（ｖ〇）、REQUEST I/F、機能毎引数項目仕様」
     # p4/46 No.5 引数名:CLMKabuNewOrder を参照してください。
@@ -615,9 +610,9 @@ def func_get_daily_price(int_p_no,
             newest_date = price_history[0]['sDate']
             date_range = f"期間: {oldest_date} ～ {newest_date}"
         
-        # グローバルなロガーを使用
-        logger = logging.getLogger()
-        logger.info(f"取得した価格履歴数: {total_days}日分 {date_range if date_range else ''}")
+        # 引数で渡されたロガーがあればそれを使い、なければモジュールのロガーを使用
+        log = logger if logger else logging.getLogger(__name__)
+        log.info(f"取得した価格履歴数: {total_days}日分 {date_range if date_range else ''}")
 
     return json_return
 
@@ -760,8 +755,9 @@ class RateLimiter:
                 self.logger.debug(f"レートリミット到達: {current_requests}件のリクエスト")
 
 class TachibanaStockAPI:
-    def __init__(self, num_threads=1):
-        self.logger = logging.getLogger()
+    def __init__(self, num_threads=1, logger=None):
+        # 外部から渡されたロガーを使用するか、デフォルトでモジュール名のロガーを使用
+        self.logger = logger if logger is not None else logging.getLogger(__name__)
         self.repo = StockRepository()
         self.num_threads = num_threads
         self.lock = threading.Lock()
@@ -857,7 +853,7 @@ class TachibanaStockAPI:
             
             with self.lock:
                 # 株価データを取得
-                dic_return = func_get_daily_price(int_p_no, my_sIssueCode, my_sSizyouC, class_cust_property)
+                dic_return = func_get_daily_price(int_p_no, my_sIssueCode, my_sSizyouC, class_cust_property, self.logger)
                 self.logger.debug(f"API応答: {dic_return}")  # APIからの応答全体を確認
             
             # 日足株価部分をリスト型で抜き出す

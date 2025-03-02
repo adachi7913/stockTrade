@@ -111,33 +111,32 @@ class IndicatorCalculator:
                         raise ValueError(f"Invalid type for {field}: expected number")
 
     def check_data_quality(self):
-        """データ品質のチェック"""
-        # 欠損値のチェック
+        """データの品質をチェックし、必要に応じて修正する"""
+        # 欠損値の処理
         if self.df.isnull().any().any():
-            logging.warning("Missing values detected in the input data")
-            # 欠損値の補完
-            self.df = self.df.interpolate(method='linear', limit_direction='both')
+            self.logger.warning("データに欠損値が検出されました。前方/後方補完で埋めます。")
             self.df = self.df.ffill().bfill()
         
         # 異常値のチェック
         for col in ['open', 'high', 'low', 'close']:
             # 0以下の値をチェック
             if (self.df[col] <= 0).any():
-                logging.warning(f"Non-positive values detected in {col}")
+                self.logger.warning(f"{col}に0以下の値が検出されました")
         
         # OHLC価格の整合性チェック
         if not all(self.df['high'] >= self.df['low']):
-            logging.error("High price is lower than low price")
-        if not all(self.df['high'] >= self.df['open']) or not all(self.df['high'] >= self.df['close']):
-            logging.error("High price is lower than open/close price")
-        if not all(self.df['low'] <= self.df['open']) or not all(self.df['low'] <= self.df['close']):
-            logging.error("Low price is higher than open/close price")
+            self.logger.error("高値が安値より低い異常データが検出されました")
+        
+        # 日付の連続性チェック
+        date_diff = self.df['date'].diff().dt.days
+        if (date_diff > 5).any():
+            self.logger.warning("日付の連続性に大きな隔たりが検出されました")
 
     def _check_cpu_usage(self):
         """CPU使用率をチェックし、必要に応じて一時停止"""
         cpu_percent = psutil.cpu_percent(interval=0.1)
         if cpu_percent > self.max_cpu_percent:
-            logging.debug(f"CPU使用率が高いため、処理を一時停止します: {cpu_percent:.1f}%")
+            self.logger.debug(f"CPU使用率が高いため、処理を一時停止します: {cpu_percent:.1f}%")
             time.sleep(1)
             return True
         return False
@@ -152,7 +151,7 @@ class IndicatorCalculator:
         
         # メモリ使用量が急増した場合はガベージコレクションを実行
         if current_memory > self.initial_memory * 1.5:
-            logging.debug(f"メモリ使用量が増加したため、ガベージコレクションを実行します: {current_memory:.1f} MB")
+            self.logger.debug(f"メモリ使用量が増加したため、ガベージコレクションを実行します: {current_memory:.1f} MB")
             gc.collect()
             return True
         
@@ -162,7 +161,7 @@ class IndicatorCalculator:
         """すべての日付に対してインジケーターを計算し、リストとして返す"""
         try:
             if self.df is None or len(self.df) == 0:
-                logging.error("データフレームが空です")
+                self.logger.error("データフレームが空です")
                 return []
             
             # CPU/メモリ使用状況をチェック
@@ -170,19 +169,19 @@ class IndicatorCalculator:
             self._check_memory_usage()
             
             # データフレームのサイズ
-            logging.debug(f"データフレームサイズ: {len(self.df)}行 x {len(self.df.columns)}列")
+            self.logger.debug(f"データフレームサイズ: {len(self.df)}行 x {len(self.df.columns)}列")
             
             # インジケーターを事前計算
             start_time = time.time()
             self._precalculate_indicators()
             precalc_time = time.time() - start_time
-            logging.debug(f"インジケーター事前計算完了: {precalc_time:.2f}秒")
+            self.logger.debug(f"インジケーター事前計算完了: {precalc_time:.2f}秒")
             
             # PCAシグナルを計算
             start_time = time.time()
             self._precalculate_pca_signal()
             pca_time = time.time() - start_time
-            logging.debug(f"PCAシグナル計算完了: {pca_time:.2f}秒")
+            self.logger.debug(f"PCAシグナル計算完了: {pca_time:.2f}秒")
             
             # 結果をリストとして整形
             result = []
@@ -207,7 +206,7 @@ class IndicatorCalculator:
                     # どうしても日付が取得できない場合は現在日付を使用
                     import datetime as dt
                     date_str = dt.datetime.now().strftime('%Y-%m-%d')
-                    logging.warning(f"日付の取得に失敗しました（インデックス: {idx}）。現在日付を使用します: {date_str}")
+                    self.logger.warning(f"日付の取得に失敗しました（インデックス: {idx}）。現在日付を使用します: {date_str}")
                 
                 # 基本データの取得
                 record = {
@@ -243,18 +242,18 @@ class IndicatorCalculator:
                 
                 # 値の検証とクリーニング
                 if not self._validate_indicators(record):
-                    logging.warning(f"インジケーター値の検証に失敗しました: {date_str}")
+                    self.logger.warning(f"インジケーター値の検証に失敗しました: {date_str}")
                     # Note: _validate_indicatorsは直接recordを修正するよう変更されているため、
                     # ここで更に修正は必要ありません。
                 
                 result.append(record)
             
-            logging.debug(f"インジケーター計算完了: 全{len(result)}レコード")
+            self.logger.debug(f"インジケーター計算完了: 全{len(result)}レコード")
             return result
             
         except Exception as e:
-            logging.error(f"インジケーター計算中にエラーが発生: {str(e)}")
-            logging.error(traceback.format_exc())
+            self.logger.error(f"インジケーター計算中にエラーが発生: {str(e)}")
+            self.logger.error(traceback.format_exc())
             return []
 
     def _precalculate_indicators(self):
@@ -265,7 +264,7 @@ class IndicatorCalculator:
             actual_length = len(self.df)
             
             if actual_length < min_data_length:
-                logging.warning(f"データ不足: {actual_length}レコード（必要数: {min_data_length}）")
+                self.logger.warning(f"データ不足: {actual_length}レコード（必要数: {min_data_length}）")
                 # データ不足の警告だけで終了せず、可能な限り計算する
             
             # 一目均衡表の計算
@@ -435,10 +434,10 @@ class IndicatorCalculator:
                 if isinstance(self._cache[key], pd.Series):
                     self._cache[key] = self._cache[key].astype(np.float32)
             
-            logging.debug("インジケーターの事前計算が完了しました")
+            self.logger.debug("インジケーターの事前計算が完了しました")
             
         except Exception as e:
-            logging.error(f"インジケーターの事前計算中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"インジケーターの事前計算中にエラーが発生しました: {str(e)}")
 
     def _precalculate_pca_signal(self):
         """PCAシグナルを事前計算"""
@@ -498,7 +497,7 @@ class IndicatorCalculator:
             self._cache['pca_signal'] = pca_signal_series
             
         except Exception as e:
-            logging.error(f"PCAシグナルの事前計算中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"PCAシグナルの事前計算中にエラーが発生しました: {str(e)}")
             self._cache['pca_signal'] = pd.Series(np.zeros(len(self.df), dtype=np.float32), index=self.df.index)
 
     def _get_cached_value(self, key: str, idx: int) -> float:
@@ -587,7 +586,7 @@ class IndicatorCalculator:
             for ind in numeric_indicators:
                 value = indicators.get(ind)
                 if value is None or not isinstance(value, (int, float)) or np.isnan(value) or np.isinf(value):
-                    logging.debug(f"無効な{ind}値: {value}")
+                    self.logger.debug(f"無効な{ind}値: {value}")
                     # 無効値を検出した場合は適切なデフォルト値に置き換え
                     if ind in ['stoch_k', 'stoch_d', 'rsi']:
                         indicators[ind] = 50  # 中立値を使用
@@ -598,23 +597,23 @@ class IndicatorCalculator:
                     
             # 範囲チェック
             if not (0 <= indicators['stoch_k'] <= 100):
-                logging.debug(f"ストキャスティクス%K値が範囲外: {indicators['stoch_k']}")
+                self.logger.debug(f"ストキャスティクス%K値が範囲外: {indicators['stoch_k']}")
                 # 範囲外の値を適切な範囲内に収める
                 indicators['stoch_k'] = min(max(indicators['stoch_k'], 0), 100)
                 
             if not (0 <= indicators['stoch_d'] <= 100):
-                logging.debug(f"ストキャスティクス%D値が範囲外: {indicators['stoch_d']}")
+                self.logger.debug(f"ストキャスティクス%D値が範囲外: {indicators['stoch_d']}")
                 indicators['stoch_d'] = min(max(indicators['stoch_d'], 0), 100)
                 
             if not (0 <= indicators['rsi'] <= 100):
-                logging.debug(f"RSI値が範囲外: {indicators['rsi']}")
+                self.logger.debug(f"RSI値が範囲外: {indicators['rsi']}")
                 indicators['rsi'] = min(max(indicators['rsi'], 0), 100)
             
             # ボリンジャーバンドの整合性チェック
             bb_values = [indicators['bb_lower'], indicators['bb_middle'], indicators['bb_upper']]
             if all(isinstance(v, (int, float)) and not np.isnan(v) and not np.isinf(v) for v in bb_values):
                 if not (indicators['bb_lower'] <= indicators['bb_middle'] <= indicators['bb_upper']):
-                    logging.debug(f"ボリンジャーバンドの整合性エラー: {bb_values}")
+                    self.logger.debug(f"ボリンジャーバンドの整合性エラー: {bb_values}")
                     # 現在価格を中心にして妥当な幅に再設定
                     close = indicators.get('close', 0)
                     indicators['bb_middle'] = close
@@ -625,7 +624,7 @@ class IndicatorCalculator:
             return True
             
         except Exception as e:
-            logging.error(f"インジケーター検証中にエラー: {e}")
+            self.logger.error(f"インジケーター検証中にエラー: {e}")
             # エラー時は強制的に妥当な値に修正
             for ind in ['stoch_k', 'stoch_d', 'rsi']:
                 indicators[ind] = 50
