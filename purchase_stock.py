@@ -502,7 +502,7 @@ class StockPurchaseManager:
                     prompt = self.prompt_generator.generate_entry_prompt(
                         stock_data=candidate,
                         backtest_results=backtest_results,
-                        technical_data=historical_data[-10:] if len(historical_data) >= 10 else historical_data,
+                        technical_data=historical_data,
                         entry_score=entry_score
                     )
                 
@@ -589,7 +589,7 @@ def main():
     # コマンドラインオプションの解析
     import argparse
     parser = argparse.ArgumentParser(description='株式購入処理を実行')
-    parser.add_argument('--max-calls', type=int, default=5, help='一回の処理で最大何件のAI判断を行うか（デフォルト: 5）')
+    parser.add_argument('--max-calls', type=int, default=50, help='一回の処理で最大何件のAI判断を行うか（デフォルト: 50）')
     parser.add_argument('--min-score', type=float, default=70.0, help='エントリースコアの最低値（デフォルト: 70.0）')
     parser.add_argument('--api-delay', type=int, default=30, help='AI API呼び出し間の待機時間（秒、デフォルト: 30）')
     parser.add_argument('--test-mode', action='store_true', help='テストモードを有効にする（実際の購入処理をスキップ）')

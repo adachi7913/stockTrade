@@ -647,10 +647,16 @@ class StockRepository(BaseRepository):
             query = """
             INSERT INTO api_response (
                 date, code, close, rule_entry_price, rule_stop_limit,
-                rule_top_price, rule_period, risk_reward, no_entry_span, update_when, entry_score, expected_return, reason
+                rule_top_price, rule_period, risk_reward, no_entry_span, update_when, 
+                entry_score, expected_return, reason,
+                entry_conditions, exit_conditions, short_term_trend, mid_term_trend,
+                long_term_trend, support_resistance, technical_patterns, indicator_analysis
             ) VALUES (
                 %(date)s, %(code)s, %(close)s, %(rule_entry_price)s, %(rule_stop_limit)s,
-                %(rule_top_price)s, %(rule_period)s, %(risk_reward)s, %(no_entry_span)s, NOW(), %(entry_score)s, %(expected_return)s, %(reason)s
+                %(rule_top_price)s, %(rule_period)s, %(risk_reward)s, %(no_entry_span)s, NOW(), 
+                %(entry_score)s, %(expected_return)s, %(reason)s,
+                %(entry_conditions)s, %(exit_conditions)s, %(short_term_trend)s, %(mid_term_trend)s,
+                %(long_term_trend)s, %(support_resistance)s, %(technical_patterns)s, %(indicator_analysis)s
             )
             ON CONFLICT (code) DO UPDATE SET
                 date = EXCLUDED.date,
@@ -664,7 +670,15 @@ class StockRepository(BaseRepository):
                 update_when = NOW(),
                 entry_score = EXCLUDED.entry_score,
                 expected_return = EXCLUDED.expected_return,
-                reason = EXCLUDED.reason;
+                reason = EXCLUDED.reason,
+                entry_conditions = EXCLUDED.entry_conditions,
+                exit_conditions = EXCLUDED.exit_conditions,
+                short_term_trend = EXCLUDED.short_term_trend,
+                mid_term_trend = EXCLUDED.mid_term_trend,
+                long_term_trend = EXCLUDED.long_term_trend,
+                support_resistance = EXCLUDED.support_resistance,
+                technical_patterns = EXCLUDED.technical_patterns,
+                indicator_analysis = EXCLUDED.indicator_analysis;
             """
             
             self.cur.execute(query, response_data)
