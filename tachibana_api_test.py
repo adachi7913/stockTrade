@@ -26,11 +26,24 @@ def main():
         # APIクライアントの初期化
         api = TachibanaStockAPI()
         
-        # ログインと株価取得を実行
+        # ログイン
         logger.info("立花証券APIにログインします")
-        api.execute_stock_price_retrieval(start_code)
-        logger.info("API処理が完了しました")
+        login_result = api.login()
         
+        if login_result:
+            logger.info("ログイン成功")
+            
+            # 銘柄情報の取得
+            if start_code:
+                stock_info = api.get_stock_info(start_code)
+                logger.info(f"銘柄情報: {stock_info}")
+            
+            # ログアウト
+            logger.info("ログアウトします")
+            api.logout()
+        else:
+            logger.error("ログインに失敗しました")
+    
     except Exception as e:
         logger.error(f"エラーが発生しました: {e}")
     
