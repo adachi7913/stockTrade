@@ -140,7 +140,21 @@ def parse_response(full_data, response, code=None, logger=None):
     
     try:
         # レスポンスが文字列の場合はJSONに変換
-        response_data = json.loads(response) if isinstance(response, str) else response
+        if isinstance(response, str):
+            # まずJSONブロックを抽出
+            json_text = extract_json_from_text(response)
+            try:
+                response_data = json.loads(json_text)
+            except json.JSONDecodeError as e:
+                log.error(f"JSONデコードエラー: {e}")
+                log.error(f"対象テキスト: {json_text[:200]}...")  # 最初の200文字だけログ出力
+                return None
+        else:
+            response_data = response
+            
+        if not isinstance(response_data, dict):
+            log.error(f"レスポンスが辞書型ではありません: {type(response_data)}")
+            return None
         
         entry_score = response_data.get("entry_score", 0)
         reason = response_data.get("reason", "")
@@ -246,18 +260,27 @@ def parse_response(full_data, response, code=None, logger=None):
         return None
 
 def extract_json_from_text(text):
-    """テキストからJSON部分を抽出"""
+    """テキストからJSON部分を抽出し、エスケープシーケンスを適切に処理"""
     # コードブロック内のJSONを探す
     code_block_match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
     if code_block_match:
-        return code_block_match.group(1)
+        json_text = code_block_match.group(1)
+    else:
+        # 単純な{}で囲まれた部分を探す
+        json_match = re.search(r"\{.*\}", text, re.DOTALL)
+        if json_match:
+            json_text = json_match.group(0)
+        else:
+            json_text = text
+            
+    # 不正なエスケープシーケンスを修正
+    # バックスラッシュをダブルバックスラッシュに置換（ただし既にエスケープされているものは除く）
+    json_text = re.sub(r'(?<!\\)\\(?!["\\/bfnrt])', r'\\\\', json_text)
     
-    # 単純な{}で囲まれた部分を探す
-    json_match = re.search(r"\{.*\}", text, re.DOTALL)
-    if json_match:
-        return json_match.group(0)
+    # 改行文字を適切にエスケープ
+    json_text = json_text.replace('\n', '\\n')
     
-    return text
+    return json_text
 
 def safe_int(value):
     """安全に整数に変換"""
