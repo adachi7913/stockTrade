@@ -142,12 +142,28 @@ def parse_response(full_data, response, code=None, logger=None):
         # レスポンスが文字列の場合はJSONに変換
         if isinstance(response, str):
             # まずJSONブロックを抽出
-            json_text = extract_json_from_text(response)
+            json_text = extract_json_from_text(response, logger=log)
+            
+            # デバッグ用にJSON文字列の状態を出力
+            log.debug(f"パース前のJSON文字列の型: {type(json_text)}")
+            log.debug(f"パース前のJSON文字列の長さ: {len(json_text)}")
+            
             try:
+                # 文字列の前後の空白を除去してからパース
+                json_text = json_text.strip()
                 response_data = json.loads(json_text)
             except json.JSONDecodeError as e:
                 log.error(f"JSONデコードエラー: {e}")
                 log.error(f"対象テキスト: {json_text[:200]}...")  # 最初の200文字だけログ出力
+                
+                # エラーの詳細な位置情報を出力
+                error_pos = e.pos
+                context_start = max(0, error_pos - 20)
+                context_end = min(len(json_text), error_pos + 20)
+                error_context = json_text[context_start:context_end]
+                log.error(f"エラー位置周辺のテキスト: {error_context}")
+                log.error(f"エラー位置: {error_pos}")
+                
                 return None
         else:
             response_data = response
@@ -259,28 +275,65 @@ def parse_response(full_data, response, code=None, logger=None):
         log.error(f"パースエラー: {e}")
         return None
 
-def extract_json_from_text(text):
+def extract_json_from_text(text, logger=None):
     """テキストからJSON部分を抽出し、エスケープシーケンスを適切に処理"""
-    # コードブロック内のJSONを探す
-    code_block_match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
-    if code_block_match:
-        json_text = code_block_match.group(1)
-    else:
-        # 単純な{}で囲まれた部分を探す
-        json_match = re.search(r"\{.*\}", text, re.DOTALL)
-        if json_match:
-            json_text = json_match.group(0)
+    log = logger if logger else logging.getLogger()
+    
+    try:
+        # 入力テキストの前処理
+        text = text.strip()  # 前後の空白を除去
+        
+        # BOMがある場合は除去
+        if text.startswith('\ufeff'):
+            text = text[1:]
+        
+        # コードブロック内のJSONを探す
+        code_block_match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+        if code_block_match:
+            json_text = code_block_match.group(1)
+            log.info("コードブロックからJSONを抽出しました")
         else:
-            json_text = text
+            # 単純な{}で囲まれた部分を探す
+            json_match = re.search(r"\{.*\}", text, re.DOTALL)
+            if json_match:
+                json_text = json_match.group(0)
+                log.info("{}で囲まれた部分からJSONを抽出しました")
+            else:
+                json_text = text
+                log.info("テキスト全体をJSONとして扱います")
+        
+        # JSONテキストの正規化
+        json_text = json_text.strip()
+        
+        # インデントと改行を正規化
+        json_text = re.sub(r'[\n\r\t ]+', ' ', json_text)
+        
+        # 不要なスペースを削除（ただし文字列内のスペースは保持）
+        json_text = re.sub(r'\s*,\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', ',', json_text)  # カンマの前後のスペース
+        json_text = re.sub(r'\s*:\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', ':', json_text)  # コロンの前後のスペース
+        json_text = re.sub(r'\s*\{\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', '{', json_text)  # 波括弧の内側のスペース
+        json_text = re.sub(r'\s*\}\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', '}', json_text)  # 波括弧の内側のスペース
+        
+        # プロパティ名をダブルクォートで囲む（すでにクォートされていない場合のみ）
+        json_text = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_text)
+        
+        # 正規化したJSONをパースしてみる（検証用）
+        try:
+            json.loads(json_text)
+            log.info("JSONの構文チェックに成功しました")
+        except json.JSONDecodeError as e:
+            log.error(f"JSONの構文チェックに失敗: {e}")
+            # エラー位置の前後のコンテキストを出力
+            error_pos = e.pos
+            context_start = max(0, error_pos - 20)
+            context_end = min(len(json_text), error_pos + 20)
+            log.error(f"エラー位置周辺のテキスト: {json_text[context_start:context_end]}")
             
-    # 不正なエスケープシーケンスを修正
-    # バックスラッシュをダブルバックスラッシュに置換（ただし既にエスケープされているものは除く）
-    json_text = re.sub(r'(?<!\\)\\(?!["\\/bfnrt])', r'\\\\', json_text)
-    
-    # 改行文字を適切にエスケープ
-    json_text = json_text.replace('\n', '\\n')
-    
-    return json_text
+        return json_text
+        
+    except Exception as e:
+        log.error(f"JSON抽出中にエラー: {e}")
+        return text
 
 def safe_int(value):
     """安全に整数に変換"""
