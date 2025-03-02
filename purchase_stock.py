@@ -41,7 +41,7 @@ class StockPurchaseManager:
     このクラスは同期処理を使用して、データ取得と処理を実現します。
     """
     
-    def __init__(self, max_ai_calls=5, min_entry_score=70.0, api_delay=60, test_mode=False):
+    def __init__(self, max_ai_calls=5, min_entry_score=70.0, api_delay=30, test_mode=False):
         """
         初期化処理
         
@@ -591,7 +591,7 @@ def main():
     parser = argparse.ArgumentParser(description='株式購入処理を実行')
     parser.add_argument('--max-calls', type=int, default=5, help='一回の処理で最大何件のAI判断を行うか（デフォルト: 5）')
     parser.add_argument('--min-score', type=float, default=70.0, help='エントリースコアの最低値（デフォルト: 70.0）')
-    parser.add_argument('--api-delay', type=int, default=60, help='AI API呼び出し間の待機時間（秒、デフォルト: 60）')
+    parser.add_argument('--api-delay', type=int, default=30, help='AI API呼び出し間の待機時間（秒、デフォルト: 30）')
     parser.add_argument('--test-mode', action='store_true', help='テストモードを有効にする（実際の購入処理をスキップ）')
     args = parser.parse_args()
 

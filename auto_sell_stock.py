@@ -5,6 +5,20 @@
 自動売却処理スクリプト
 
 保有中の銘柄を自動的に評価し、売却条件を満たしている場合に売却処理を行います。
+
+実行モード:
+- 通常モード: 売却条件を満たした銘柄に対して実際に売却処理を実行します
+- テストモード: 売却判断は行いますが、実際の売却処理は行いません（シミュレーションのみ）
+- 強制売却テストモード: 売却判断をスキップして強制的に売却操作をテストします
+
+実行方法:
+python auto_sell_stock.py [オプション]
+
+オプション:
+--test, -t        : テストモードで実行（売却処理を実行せずシミュレーションのみ）
+--force-sell, -f  : 売却判断をスキップして強制的に売却処理のみをテストするモード
+--output, -o FILE : テストモード時のレポート出力ファイル
+--debug           : デバッグモードで実行（詳細なログを出力）
 """
 
 import os
@@ -22,6 +36,7 @@ from repository.entry_repository import EntryRepository
 from repository.stock_repository import StockRepository
 from service.backtest_service import BacktestService
 from Gemini.entry_judgment_handler import EntryJudgmentHandler
+from browser_use.sell_browser_use import SellBrowserUse
 from utils.logging_config import setup_logging
 from lib.table_category import TableCategory
 
@@ -35,12 +50,13 @@ class AutoSellStock:
     """
     保有銘柄の自動売却を行うクラス
     """
-    def __init__(self, test_mode: bool = False, logger=None):
+    def __init__(self, test_mode: bool = False, force_sell_test: bool = False, logger=None):
         """
         初期化
         
         Args:
             test_mode (bool): テスト実行モードかどうか
+            force_sell_test (bool): 売却判断をスキップして強制的に売却処理のみをテストするモード
             logger (logging.Logger, optional): 使用するロガー。指定がなければ新しいロガーを設定
         """
         self.entry_repository = EntryRepository()
@@ -57,7 +73,17 @@ class AutoSellStock:
             
         self.entry_judgment = EntryJudgmentHandler(api_key=api_key, logger=self.logger)
         self.test_mode = test_mode
+        self.force_sell_test = force_sell_test
         self.test_results = []  # テストモード時の結果を保存するリスト
+        
+        # テストモードでは実際のブラウザ操作をスキップ
+        if self.test_mode:
+            self.logger.info("テストモードが有効です。実際の売却処理はブラウザ操作を行いません。")
+            self.browser_handler = None
+        else:
+            # 通常モードの場合はブラウザ操作クラスを初期化
+            self.logger.info("ブラウザ操作による売却処理を有効化します。")
+            self.browser_handler = SellBrowserUse(logger=self.logger)
         
     def get_active_entries(self) -> List[Dict]:
         """
@@ -265,6 +291,21 @@ class AutoSellStock:
             profit_rate = ((current_price - entry_price) / entry_price) * 100
             self.logger.info(f"損益計算: 損益額={profit:,.0f}円, 損益率={profit_rate:.2f}%")
             
+            # 売却用のデータを作成
+            sell_data = {
+                'code': code,                 # 銘柄コード
+                'quantity': lot_size,         # 株数
+                'exit_price': current_price,  # 売却価格
+                'entry_price': entry_price,   # 購入価格
+                'reason': reason,             # 売却理由
+                # 追加情報（必要に応じて）
+                'profit': profit,             # 損益金額
+                'profit_rate': profit_rate,   # 損益率 
+                'entry_date': entry_date      # 購入日
+            }
+            
+            self.logger.debug(f"売却データ準備完了: {sell_data}")
+            
             # テストモードの場合は実際の売却処理をスキップ
             if self.test_mode:
                 self.logger.info(f"【テストモード】売却シミュレーション: 銘柄={code}, 価格={current_price}, 利益={profit:,.0f}円 ({profit_rate:.2f}%), 理由={reason}")
@@ -285,19 +326,35 @@ class AutoSellStock:
                 # ログ出力を追加
                 self.logger.debug(f"テスト結果を追加: 銘柄={code}, 現在のテスト結果数={len(self.test_results)}")
                 self.logger.info(f"テスト結果を保存しました: 銘柄={code}")
-                return True
-            
-            # 実モードの場合は売却情報をデータベースに記録 (status='sold'に更新)
-            self.logger.info(f"データベースに売却情報を記録します: 銘柄={code}")
-            result = self.entry_repository.update_exit_info(
-                code=code,
-                entry_date=entry_date,
-                exit_price=current_price,
-                exit_date=datetime.date.today(),
-                profit=profit,
-                profit_rate=profit_rate,
-                exit_reason=reason
-            )
+                result = True
+            else:
+                # 実際に売却処理を行う場合
+                self.logger.info(f"売却データ: {sell_data}")
+                
+                # ブラウザ操作クラスが初期化されていない場合はエラーを出力
+                if self.browser_handler is None:
+                    self.logger.error("ブラウザ操作クラスが初期化されていません。売却処理をスキップします。")
+                    return False
+                    
+                # ブラウザを使用して売却処理を実行
+                browser_result = self.browser_handler.execute_sell(sell_data)
+                if browser_result:
+                    self.logger.info(f"ブラウザ操作による売却成功: 銘柄={code}")
+                else:
+                    self.logger.error(f"ブラウザ操作による売却失敗: 銘柄={code}")
+                    return False
+                
+                # データベースに売却情報を記録
+                self.logger.info(f"データベースに売却情報を記録します: 銘柄={code}")
+                result = self.entry_repository.update_exit_info(
+                    code=code,
+                    entry_date=entry_date,
+                    exit_price=current_price,
+                    exit_date=datetime.date.today(),
+                    profit=profit,
+                    profit_rate=profit_rate,
+                    exit_reason=reason
+                )
             
             if result:
                 self.logger.info(f"売却処理成功: 銘柄={code}, 価格={current_price}, 利益={profit:,.0f}円 ({profit_rate:.2f}%), 理由={reason}")
@@ -316,7 +373,14 @@ class AutoSellStock:
         """
         try:
             start_time = datetime.datetime.now()
-            if self.test_mode:
+            if self.test_mode and self.force_sell_test:
+                self.logger.info("==========================================")
+                self.logger.info("【強制売却テストモード】自動売却処理を開始します（売却判断をスキップして強制的に売却操作をテスト）")
+                self.logger.info(f"開始時刻: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                self.logger.info("==========================================")
+                # テスト結果の初期化を確認
+                self.logger.debug(f"テスト結果初期化: test_results={self.test_results}")
+            elif self.test_mode:
                 self.logger.info("==========================================")
                 self.logger.info("【テストモード】自動売却処理を開始します（売却はシミュレーションのみ）")
                 self.logger.info(f"開始時刻: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -377,7 +441,16 @@ class AutoSellStock:
                     # 売却判断
                     should_sell, reason, current_price = self.evaluate_entry(entry)
                     
-                    if should_sell:
+                    # 強制売却テストモードの場合は、売却判断をスキップして強制的に売却
+                    if self.force_sell_test and self.test_mode:
+                        self.logger.info(f"【強制売却テストモード】銘柄 {code} を強制的に売却します")
+                        forced_reason = f"強制売却テスト（本来の判断: {'売却' if should_sell else '保持'}, 理由: {reason}）"
+                        if self.execute_sell(entry, current_price, forced_reason):
+                            sell_count += 1
+                        else:
+                            error_count += 1
+                    # 通常の売却判断
+                    elif should_sell:
                         self.logger.info(f"銘柄 {code} は売却条件を満たしています: {reason}")
                         # 売却処理
                         if self.execute_sell(entry, current_price, reason):
@@ -389,7 +462,7 @@ class AutoSellStock:
                         hold_count += 1
                         
                         # テストモード時のみ、判断に関わらず最初のエントリーを売却候補として追加（デバッグ用）
-                        if self.test_mode and idx == 1 and len(self.test_results) == 0:
+                        if self.test_mode and not self.force_sell_test and idx == 1 and len(self.test_results) == 0:
                             self.logger.debug(f"テストモード: 銘柄 {code} を強制的に売却候補としてマーク（デバッグ用）")
                             self.execute_sell(entry, current_price, f"テスト強制売却（デバッグ用）: {reason}")
                 except Exception as e:
@@ -443,28 +516,32 @@ class AutoSellStock:
                             os.makedirs(report_dir)
                         
                         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-                        output_file = os.path.join(report_dir, f"auto_sell_test_report_{timestamp}.txt")
+                        mode_prefix = "force_sell_test" if self.force_sell_test else "sell_test"
+                        output_file = f"{mode_prefix}_report_{timestamp}.csv"
                         
                         with open(output_file, 'w', encoding='utf-8') as f:
-                            f.write("===== 自動売却テストレポート =====\n")
+                            self.logger.debug(f"ファイル {output_file} を書き込みモードでオープン")
+                            if self.force_sell_test:
+                                f.write("===== 強制売却テストレポート =====\n")
+                            else:
+                                f.write("===== 自動売却テストレポート =====\n")
                             f.write(f"実行日時: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                            f.write(f"売却候補銘柄数: {len(self.test_results)}\n")
+                            f.write(f"売却候補数: {len(self.test_results)}\n\n")
                             
-                            total_profit = sum(r['profit'] for r in self.test_results)
-                            f.write(f"合計予想利益: {total_profit:,.0f}円\n\n")
+                            # CSVヘッダー
+                            f.write("銘柄コード,数量,購入価格,売却価格,利益,利益率,売却理由\n")
                             
-                            f.write("----- 売却候補一覧 -----\n")
-                            for idx, result in enumerate(self.test_results, 1):
-                                f.write(f"候補 {idx}:\n")
-                                f.write(f"  銘柄コード: {result['code']}\n")
-                                f.write(f"  数量: {result['lot_size']}株\n")
-                                f.write(f"  購入価格: {result['entry_price']:,.0f}円\n")
-                                f.write(f"  売却価格: {result['exit_price']:,.0f}円\n")
-                                f.write(f"  利益: {result['profit']:,.0f}円 ({result['profit_rate']:.2f}%)\n")
-                                f.write(f"  売却理由: {result['reason']}\n")
-                                f.write("  ---\n")
+                            # 各売却候補の詳細
+                            for result in self.test_results:
+                                code = result['code']
+                                lot_size = result['lot_size']
+                                entry_price = result['entry_price']
+                                exit_price = result['exit_price']
+                                profit = result['profit']
+                                profit_rate = result['profit_rate']
+                                reason = result['reason'].replace(',', '；')  # CSVのカンマと混同しないように置換
                                 
-                            f.write("===== レポート終了 =====\n")
+                                f.write(f"{code},{lot_size},{entry_price:.1f},{exit_price:.1f},{profit:.1f},{profit_rate:.2f},{reason}\n")
                             
                         self.logger.info(f"テストレポートを {output_file} に強制保存しました")
                     except Exception as e:
@@ -487,7 +564,11 @@ class AutoSellStock:
             self.logger.info("【テストレポート】売却候補はありませんでした")
             return
             
-        self.logger.info("\n===== テスト実行モード 売却候補レポート =====")
+        if self.force_sell_test:
+            self.logger.info("\n===== 強制売却テストモード 売却レポート =====")
+        else:
+            self.logger.info("\n===== テスト実行モード 売却候補レポート =====")
+            
         self.logger.info(f"実行日時: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         self.logger.info(f"売却候補銘柄数: {len(self.test_results)}")
         
@@ -518,51 +599,53 @@ class AutoSellStock:
         self.logger.debug(f"save_test_report メソッド呼び出し: test_mode={self.test_mode}, test_results件数={len(self.test_results) if self.test_results else 0}, output_file={output_file}")
         
         if not self.test_mode or not self.test_results:
-            self.logger.debug(f"レポート生成条件不一致: test_mode={self.test_mode}, test_results存在={bool(self.test_results)}")
+            self.logger.warning("テストモードでないか、テスト結果がないためレポートは保存しません")
             return
             
-        # レポート保存ディレクトリの設定とチェック
-        report_dir = "report"
-        if not os.path.exists(report_dir):
-            self.logger.info(f"レポートディレクトリ '{report_dir}' が存在しないため作成します")
-            os.makedirs(report_dir)
+        try:
+            # 出力ファイル名の生成
+            if not output_file:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                mode_prefix = "force_sell_test" if self.force_sell_test else "sell_test"
+                output_file = f"{mode_prefix}_report_{timestamp}.csv"
+                self.logger.debug(f"出力ファイル名を自動生成: {output_file}")
             
-        if not output_file:
-            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            output_file = os.path.join(report_dir, f"auto_sell_test_report_{timestamp}.txt")
-            self.logger.debug(f"出力ファイル名を自動生成: {output_file}")
-        else:
-            # 出力先が指定されている場合も、相対パスならreport配下に置く
+            # レポート保存ディレクトリの設定とチェック
+            report_dir = "report"
+            if not os.path.exists(report_dir):
+                self.logger.info(f"レポートディレクトリ '{report_dir}' が存在しないため作成します")
+                os.makedirs(report_dir)
+            
             if not os.path.isabs(output_file):
                 output_file = os.path.join(report_dir, output_file)
                 self.logger.debug(f"相対パスを絶対パスに変換: {output_file}")
             
-        try:
             # ファイル保存前のテスト結果サマリーをログ出力
             self.logger.debug(f"保存テスト結果: {len(self.test_results)}件, 最初の銘柄={self.test_results[0]['code'] if self.test_results else 'なし'}")
             
             with open(output_file, 'w', encoding='utf-8') as f:
                 self.logger.debug(f"ファイル {output_file} を書き込みモードでオープン")
-                f.write("===== 自動売却テストレポート =====\n")
+                if self.force_sell_test:
+                    f.write("===== 強制売却テストレポート =====\n")
+                else:
+                    f.write("===== 自動売却テストレポート =====\n")
                 f.write(f"実行日時: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"売却候補銘柄数: {len(self.test_results)}\n")
+                f.write(f"売却候補数: {len(self.test_results)}\n\n")
                 
-                total_profit = sum(r['profit'] for r in self.test_results)
-                f.write(f"合計予想利益: {total_profit:,.0f}円\n\n")
+                # CSVヘッダー
+                f.write("銘柄コード,数量,購入価格,売却価格,利益,利益率,売却理由\n")
                 
-                f.write("----- 売却候補一覧 -----\n")
-                for idx, result in enumerate(self.test_results, 1):
-                    f.write(f"候補 {idx}:\n")
-                    f.write(f"  銘柄コード: {result['code']}\n")
-                    f.write(f"  数量: {result['lot_size']}株\n")
-                    f.write(f"  購入価格: {result['entry_price']:,.0f}円\n")
-                    f.write(f"  売却価格: {result['exit_price']:,.0f}円\n")
-                    f.write(f"  利益: {result['profit']:,.0f}円 ({result['profit_rate']:.2f}%)\n")
-                    f.write(f"  売却理由: {result['reason']}\n")
-                    f.write("  ---\n")
+                # 各売却候補の詳細
+                for result in self.test_results:
+                    code = result['code']
+                    lot_size = result['lot_size']
+                    entry_price = result['entry_price']
+                    exit_price = result['exit_price']
+                    profit = result['profit']
+                    profit_rate = result['profit_rate']
+                    reason = result['reason'].replace(',', '；')  # CSVのカンマと混同しないように置換
                     
-                f.write("===== レポート終了 =====\n")
-                self.logger.debug(f"ファイル {output_file} への書き込み完了")
+                    f.write(f"{code},{lot_size},{entry_price:.1f},{exit_price:.1f},{profit:.1f},{profit_rate:.2f},{reason}\n")
                 
             self.logger.info(f"テストレポートを {output_file} に保存しました")
             # ファイルが実際に存在するか確認
@@ -583,11 +666,20 @@ def main():
     parser = argparse.ArgumentParser(description='自動売却処理')
     parser.add_argument('--debug', action='store_true', help='デバッグモードで実行')
     parser.add_argument('--test', '-t', action='store_true', help='テスト実行モード（売却処理を実行せずシミュレーションのみ）')
+    parser.add_argument('--force-sell', '-f', action='store_true', help='売却判断をスキップして強制的に売却処理のみをテストするモード')
     parser.add_argument('--output', '-o', help='テストモード時のレポート出力ファイル')
     args = parser.parse_args()
     
     # ロギングを追加: 受け取った引数情報
-    logger.debug(f"コマンドライン引数: debug={args.debug}, test={args.test}, output={args.output}")
+    logger.debug(f"コマンドライン引数: debug={args.debug}, test={args.test}, force_sell={args.force_sell}, output={args.output}")
+    
+    # 実行モードの表示
+    if args.test and args.force_sell:
+        logger.info("実行モード: 強制売却テストモード（売却判断をスキップして強制的に売却操作をテスト）")
+    elif args.test:
+        logger.info("実行モード: テストモード（売却はシミュレーションのみ）")
+    else:
+        logger.info("実行モード: 通常モード（条件を満たした銘柄を実際に売却）")
     
     # デバッグモードの設定
     if args.debug:
@@ -601,8 +693,8 @@ def main():
         
     try:
         # 自動売却処理の実行
-        auto_sell = AutoSellStock(test_mode=args.test, logger=logger)
-        logger.debug(f"AutoSellStockインスタンス生成: test_mode={args.test}")
+        auto_sell = AutoSellStock(test_mode=args.test, force_sell_test=args.force_sell, logger=logger)
+        logger.debug(f"AutoSellStockインスタンス生成: test_mode={args.test}, force_sell_test={args.force_sell}")
         
         run_result = auto_sell.run()
         logger.debug(f"run()メソッド実行完了: 結果={run_result}")
