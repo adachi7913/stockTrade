@@ -42,6 +42,19 @@ def validate_response_data(data, logger=None):
         'no_entry_span': int
     }
     
+    # オプションフィールドの定義
+    optional_fields = {
+        'entry_conditions': str,
+        'exit_conditions': str,
+        'short_term_trend': str,
+        'mid_term_trend': str,
+        'long_term_trend': str,
+        'support_resistance': str,
+        'technical_patterns': str,
+        'indicator_analysis': str
+    }
+    
+    # 必須フィールドのチェック
     for field, expected_type in required_fields.items():
         if field not in data:
             log.error(f"Missing required field: {field}")
@@ -65,6 +78,29 @@ def validate_response_data(data, logger=None):
             except Exception as e:
                 log.error(f"Error processing field {field}: {e}")
                 return False
+    
+    # オプションフィールドのチェック（存在する場合のみ型チェック）
+    for field, expected_type in optional_fields.items():
+        if field in data and data[field] is not None:
+            value = data[field]
+            if not isinstance(value, expected_type):
+                try:
+                    # 空の値の場合は許容
+                    if value == "" or value is None:
+                        continue
+                        
+                    # リスト型を文字列として処理
+                    if isinstance(value, list) and expected_type == str:
+                        log.info(f"リスト型のフィールド {field} を文字列に変換します")
+                        data[field] = "\n".join([f"- {item}" for item in value]) if value else ""
+                        continue
+                        
+                    log.warning(f"Optional field {field} has unexpected type. Expected {expected_type}, got {type(value)}")
+                    # オプションフィールドなので、型不一致でもエラーではなく警告に留める
+                    data[field] = str(value)  # 強制的に文字列型に変換
+                except Exception as e:
+                    log.warning(f"Error processing optional field {field}: {e}")
+                    data[field] = ""  # エラー時は空文字を設定
     
     # 日付のフォーマット検証
     if not validate_date_format(data['date']):
@@ -117,6 +153,43 @@ def parse_response(full_data, response, code=None, logger=None):
         rule_period = str(rule.get("period", "NG"))
         risk_reward = str(rule.get("risk_reward", rule.get("riskReward", "NG")))  # risk_rewardとriskRewardの両方に対応
         
+        # 新しいフィールドの取得
+        entry_conditions = response_data.get("entry_conditions", "")
+        exit_conditions = response_data.get("exit_conditions", "")
+        
+        # リスト型の場合は改行区切りの文字列に変換
+        if isinstance(entry_conditions, list):
+            entry_conditions = "\n".join([f"- {item}" for item in entry_conditions])
+        
+        if isinstance(exit_conditions, list):
+            exit_conditions = "\n".join([f"- {item}" for item in exit_conditions])
+        
+        # 市場分析情報の取得
+        market_analysis = response_data.get("market_analysis", {})
+        if not isinstance(market_analysis, dict):
+            log.warning(f"market_analysis is not a dictionary: {type(market_analysis)}")
+            market_analysis = {}
+            
+        short_term_trend = market_analysis.get("short_term_trend", "") if isinstance(market_analysis, dict) else ""
+        mid_term_trend = market_analysis.get("mid_term_trend", "") if isinstance(market_analysis, dict) else ""
+        long_term_trend = market_analysis.get("long_term_trend", "") if isinstance(market_analysis, dict) else ""
+        support_resistance = market_analysis.get("support_resistance", "") if isinstance(market_analysis, dict) else ""
+        
+        # support_resistanceがリスト型の場合は文字列に変換
+        if isinstance(support_resistance, list):
+            support_resistance = "\n".join([f"- {item}" for item in support_resistance])
+        
+        # テクニカルパターンとインジケーター分析
+        technical_patterns = response_data.get("technical_patterns", "")
+        indicator_analysis = response_data.get("indicator_analysis", "")
+        
+        # リスト型の場合は改行区切りの文字列に変換
+        if isinstance(technical_patterns, list):
+            technical_patterns = "\n".join([f"- {item}" for item in technical_patterns])
+            
+        if isinstance(indicator_analysis, list):
+            indicator_analysis = "\n".join([f"- {item}" for item in indicator_analysis])
+        
         # 想定リターンの計算（利確目標 - エントリー価格）
         try:
             if rule_entry_price != "NG" and rule_top_price != "NG":
@@ -151,7 +224,16 @@ def parse_response(full_data, response, code=None, logger=None):
             "no_entry_span": response_data.get("no_entry_span", 0),
             "entry_score": entry_score,
             "expected_return": expected_return,
-            "reason": reason
+            "reason": reason,
+            # 新しいフィールドを追加
+            "entry_conditions": entry_conditions,
+            "exit_conditions": exit_conditions,
+            "short_term_trend": short_term_trend,
+            "mid_term_trend": mid_term_trend,
+            "long_term_trend": long_term_trend,
+            "support_resistance": support_resistance,
+            "technical_patterns": technical_patterns,
+            "indicator_analysis": indicator_analysis
         }
         
         # データの検証

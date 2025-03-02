@@ -253,6 +253,138 @@ class PromptGenerator:
         
         return summary
 
+    def generate_entry_rule_evaluation_prompt(self, 
+                             stock_data: Dict[str, Any], 
+                             backtest_results: Dict[str, Any], 
+                             technical_data: List[Dict[str, Any]], 
+                             entry_score: float) -> str:
+        """
+        エントリールール評価に特化したプロンプトを生成
+        
+        Args:
+            stock_data (Dict): 銘柄情報とエントリールール情報を含む辞書
+            backtest_results (Dict): バックテスト結果の辞書
+            technical_data (List[Dict]): テクニカル指標データのリスト（過去数日分）
+            entry_score (float): 事前計算されたエントリースコア
+            
+        Returns:
+            str: 生成されたプロンプト
+        """
+        # 最新のADX値をログに出力
+        latest_data = technical_data[-1] if technical_data else {}
+        
+        # ADX値をログに出力（デバッグ用）
+        adx_value = latest_data.get('adx')
+        self.logger.debug(f"最新のADX値: {adx_value}")
+        
+        # 基本的な銘柄情報
+        stock_code = stock_data.get('code', 'unknown')
+        company_name = stock_data.get('company_name', 'unknown')
+        current_price = stock_data.get('close', 0)
+        
+        # エントリールール情報
+        entry_price = stock_data.get('entry_price') or stock_data.get('rule_entry_price', 'データなし')
+        stop_loss = stock_data.get('stop_loss') or stock_data.get('rule_stop_limit', 'データなし')
+        target_price = stock_data.get('target_price') or stock_data.get('rule_top_price', 'データなし')
+        expected_period = stock_data.get('period') or stock_data.get('rule_period', 'データなし')
+        risk_reward = stock_data.get('risk_reward', 'データなし')
+        expected_return = stock_data.get('expected_return', 'データなし')
+        
+        # エントリー条件と決済条件
+        entry_conditions = stock_data.get('entry_conditions', 'データなし')
+        exit_conditions = stock_data.get('exit_conditions', 'データなし')
+        
+        # 市場分析と技術分析
+        market_overview = stock_data.get('market_overview', 'データなし')
+        technical_analysis = stock_data.get('technical_analysis', 'データなし')
+        
+        # プロンプトを構築する
+        prompt = f"""
+# 株式エントリールール評価リクエスト
+
+## 基本情報
+- 銘柄コード: {stock_code}
+- 企業名: {company_name}
+- 現在価格: {current_price}円
+- 事前スコア: {entry_score:.1f}/100
+
+## エントリールール詳細
+- エントリー価格: {entry_price}円
+- ストップロス: {stop_loss}円 
+- 目標価格: {target_price}円
+- 想定保有期間: {expected_period}日
+- リスクリワード比: {risk_reward}
+- 期待リターン: {expected_return}%
+
+## エントリー・決済条件
+- エントリー条件: {entry_conditions}
+- 決済条件: {exit_conditions}
+
+## 市場・技術分析
+- 市場概況: {market_overview}
+- 技術的分析: {technical_analysis}
+
+## 現在の技術指標状況
+"""
+        
+        # 直近5日分の詳細データを表示
+        recent_data = technical_data[-3:] if len(technical_data) >= 3 else technical_data
+        for idx, day_data in enumerate(reversed(recent_data)):
+            day_num = idx + 1
+            date = day_data.get('date', '不明')
+            prompt += f"""
+### {day_num}日前 ({date})
+- **価格**: 始値={day_data.get('open', 0):.1f}円, 高値={day_data.get('high', 0):.1f}円, 安値={day_data.get('low', 0):.1f}円, 終値={day_data.get('close', 0):.1f}円
+- **RSI**: {day_data.get('rsi', 0):.1f}
+- **ストキャスティクス**: %K={day_data.get('stoch_k', 0):.1f}, %D={day_data.get('stoch_d', 0):.1f}
+- **ADX**: {day_data.get('adx', 0):.1f}
+- **MACD**: {day_data.get('macd', 0):.2f}
+- **ボリンジャーバンド**: 下={day_data.get('bb_lower', 0):.1f}, 中={day_data.get('bb_middle', 0):.1f}, 上={day_data.get('bb_upper', 0):.1f}
+"""
+
+        # バックテスト結果のサマリー
+        prompt += f"""
+## バックテスト結果サマリー
+- 勝率: {backtest_results.get('success_rate', 0):.1f}%
+- 平均リターン: {backtest_results.get('average_return', 0):.2f}
+- 取引回数: {backtest_results.get('total_trades', 0)}回
+"""
+
+        # 最も成功した戦略があれば追加
+        if backtest_results.get('best_strategy'):
+            prompt += f"- 最適戦略: {backtest_results.get('best_strategy', 'なし')}\n"
+
+        # 判断指示を追加
+        prompt += f"""
+## 評価指示
+上記のエントリールールを以下の観点から総合的に評価してください。
+
+特に以下の点を重視してください:
+1. 現在の技術指標はエントリールールの条件と一致しているか
+2. リスクリワード比は適切か (2以上が望ましい)
+3. ストップロスと目標価格の設定は現在の市場状況に合っているか
+4. バックテスト結果はこのエントリー戦略を支持しているか
+5. エントリー条件と決済条件の論理性と明確さ
+6. 市場概況・技術分析とエントリールールの整合性
+
+以下の形式で回答してください:
+```json
+{{
+  "should_enter": true/false,
+  "confidence": 0-100,
+  "reasoning": "エントリールールの評価理由を簡潔に説明",
+  "rule_evaluation": "エントリールールの強み・弱みについてのコメント",
+  "current_match": "現在の市場状況とエントリールールの一致度(0-100)",
+  "concerns": "潜在的な懸念事項があれば記載"
+}}
+```
+"""
+
+        if self.verbose:
+            self.logger.debug(f"生成されたエントリールール評価プロンプト（長さ: {len(prompt)}文字）:\n{prompt}")
+        
+        return prompt
+
 
 if __name__ == "__main__":
     # 使用例
