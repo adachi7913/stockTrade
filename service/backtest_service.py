@@ -34,6 +34,10 @@ class TrendFollowingStrategy(bt.Strategy):
             self.pre_cash = None  # 注文前の残高を保持
             self.trades = []  # 取引履歴を保存するリスト
             
+            # ADX値を記録するリストを追加
+            self.adx_values = []
+            self.adx_summary = {}  # 統計情報を保存する辞書
+            
             self.logger.debug("TrendFollowingStrategy初期化完了")
         except Exception as e:
             import traceback
@@ -116,9 +120,74 @@ class TrendFollowingStrategy(bt.Strategy):
                     
                     # 決済注文実行
                     self.order = self.close()
+
+            # ADX値を記録
+            current_adx = self.adx[0]
+            self.adx_values.append(current_adx)
+            
+            # より詳細なデバッグ情報
+            if len(self.data) % 20 == 0:  # 20バーごとに記録（頻度は調整可能）
+                self.logger.debug(f"ADX詳細 - 日付: {self.data.datetime.date(0).isoformat()}, ADX: {current_adx}, +DI: {self.adx.DIplus[0]}, -DI: {self.adx.DIminus[0]}")
         except Exception as e:
             import traceback
             self.logger.error(f"TrendFollowingStrategy.next()でエラー発生: {e}")
+            self.logger.error(f"詳細なエラー情報: {traceback.format_exc()}")
+
+    def stop(self):
+        """バックテスト終了時に呼ばれるメソッド"""
+        try:
+            # ADX値の統計情報を計算
+            if self.adx_values:
+                import numpy as np
+                
+                # 基本統計
+                adx_values = np.array(self.adx_values)
+                adx_min = np.min(adx_values)
+                adx_max = np.max(adx_values)
+                adx_mean = np.mean(adx_values)
+                adx_median = np.median(adx_values)
+                
+                # 分布状況
+                zeros_count = np.sum(adx_values == 0)
+                zeros_percent = (zeros_count / len(adx_values)) * 100
+                
+                # 範囲ごとの分布
+                ranges = [(0, 0), (0, 10), (10, 20), (20, 30), (30, 50), (50, 100)]
+                distribution = {}
+                
+                for low, high in ranges:
+                    if low == 0 and high == 0:
+                        count = zeros_count
+                    else:
+                        count = np.sum((adx_values > low) & (adx_values <= high))
+                    percentage = (count / len(adx_values)) * 100
+                    distribution[f"{low}-{high}"] = {
+                        "count": int(count),
+                        "percentage": float(percentage)
+                    }
+                
+                # 統計情報を保存
+                self.adx_summary = {
+                    "count": len(adx_values),
+                    "min": float(adx_min),
+                    "max": float(adx_max),
+                    "mean": float(adx_mean),
+                    "median": float(adx_median),
+                    "zeros_count": int(zeros_count),
+                    "zeros_percent": float(zeros_percent),
+                    "distribution": distribution
+                }
+                
+                # 結果をログに出力
+                self.logger.info(f"ADX分析結果: 合計={len(adx_values)}ポイント, 範囲={adx_min:.2f}～{adx_max:.2f}, 平均={adx_mean:.2f}")
+                self.logger.info(f"ADX値が0のポイント: {zeros_count}件 ({zeros_percent:.2f}%)")
+                
+                for range_key, data in distribution.items():
+                    self.logger.info(f"ADX {range_key}: {data['count']}件 ({data['percentage']:.2f}%)")
+                
+        except Exception as e:
+            import traceback
+            self.logger.error(f"ADX分析中にエラー発生: {e}")
             self.logger.error(f"詳細なエラー情報: {traceback.format_exc()}")
 
 class ReverseStrategy(bt.Strategy):
@@ -438,13 +507,19 @@ def run_backtest(symbol: str, start_date: str, end_date: str, strategy_type: str
     final_value = cerebro.broker.getvalue()
     log.info("最終ポートフォリオ価値: {:.2f}".format(final_value))
     
+    # ADX分析結果を取得（トレンドフォロー戦略の場合のみ）
+    adx_analysis = {}
+    if strategy_type == 'tr' and hasattr(strategy, 'adx_summary'):
+        adx_analysis = strategy.adx_summary
+    
     # 結果をJSON形式で返す
     result = {
         "strategy": strategy_name,
         "stock_code": symbol,
         "period": f"{start_date} to {end_date}",
         "trades": strategy.trades,
-        "final_portfolio_value": final_value
+        "final_portfolio_value": final_value,
+        "adx_analysis": adx_analysis  # ADX分析結果を追加
     }
     
     # グラフ描画（必要な場合）
@@ -719,3 +794,43 @@ class BacktestService:
         except Exception as e:
             self.logger.error(f"複数戦略バックテスト実行中にエラー: {e}", exc_info=True)
             return []
+
+def visualize_adx_distribution(adx_analysis, symbol):
+    """ADXの分布を視覚化"""
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        # 分布データを取得
+        distribution = adx_analysis.get('distribution', {})
+        ranges = []
+        counts = []
+        
+        for range_key, data in sorted(distribution.items()):
+            if range_key != "0-0":  # 0-0は特殊ケースなので除外
+                ranges.append(range_key)
+                counts.append(data.get('count', 0))
+        
+        # グラフ作成
+        plt.figure(figsize=(10, 6))
+        plt.bar(ranges, counts)
+        plt.title(f"ADX Distribution - Symbol: {symbol}")
+        plt.xlabel("ADX Range")
+        plt.ylabel("Count")
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        # 0の割合を注釈として追加
+        zeros_percent = adx_analysis.get('zeros_percent', 0)
+        plt.annotate(f"ADX=0: {zeros_percent:.2f}%", 
+                     xy=(0.05, 0.95), 
+                     xycoords='axes fraction',
+                     bbox=dict(boxstyle="round,pad=0.3", fc="yellow", alpha=0.3))
+        
+        # ファイルに保存
+        plt.savefig(f"adx_distribution_{symbol}.png")
+        plt.close()
+        
+        return True
+    except Exception as e:
+        logger.error(f"視覚化中にエラー: {e}")
+        return False

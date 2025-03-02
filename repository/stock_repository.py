@@ -170,7 +170,12 @@ class StockRepository(BaseRepository):
             
             query = """
             WITH price_data AS (
-                SELECT p.*, i.macd, i.stoch_k, i.stoch_d, i.rsi, i.bb_lower, i.bb_middle, i.bb_upper, i.atr
+                SELECT p.*, 
+                       i.macd, i.stoch_k, i.stoch_d, i.rsi, 
+                       i.bb_lower, i.bb_middle, i.bb_upper, i.atr,
+                       i.adx, i.ichimoku_tenkan, i.ichimoku_kijun, 
+                       i.ichimoku_senkou_a, i.ichimoku_senkou_b,
+                       i.dynamic_threshold, i.weekly_trend, i.pca_signal
                 FROM {}_price p
                 LEFT JOIN {}_indicator i ON p.code = i.code AND p.date = i.date
                 WHERE p.code = %s
@@ -206,7 +211,15 @@ class StockRepository(BaseRepository):
                     'bb_lower': row[11],
                     'bb_middle': row[12],
                     'bb_upper': row[13],
-                    'atr': row[14]
+                    'atr': row[14],
+                    'adx': row[15],
+                    'ichimoku_tenkan': row[16],
+                    'ichimoku_kijun': row[17],
+                    'ichimoku_senkou_a': row[18],
+                    'ichimoku_senkou_b': row[19],
+                    'dynamic_threshold': row[20],
+                    'weekly_trend': row[21],
+                    'pca_signal': row[22]
                 }
                 result.append(data)
             

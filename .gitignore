@@ -17,3 +17,5 @@ report/
 docker-compose.yml
 Dockerfile
 refresh_views.bat
+adx_analysis.py
+*.csv

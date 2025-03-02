@@ -211,21 +211,30 @@ def calculate_entry_score(stock_data, backtest_results, technical_indicators):
         bb_upper = technical_indicators.get('bb_upper')
         
         if all(x is not None for x in [close, bb_lower, bb_middle, bb_upper]):
-            # 位置を0-1の範囲で正規化 (0=下限、0.5=中央、1=上限)
-            if bb_upper > bb_lower:  # 分母がゼロにならないことを確認
-                bb_position = (close - bb_lower) / (bb_upper - bb_lower)
+            try:
+                # 全ての値を確実にfloat型に変換
+                close_float = float(close)
+                bb_lower_float = float(bb_lower)
+                bb_middle_float = float(bb_middle)
+                bb_upper_float = float(bb_upper)
                 
-                # 理想的な位置は0.3〜0.5（やや下方から中央）
-                if 0.3 <= bb_position <= 0.5:
-                    bb_score = 8
-                elif 0.1 <= bb_position < 0.3 or 0.5 < bb_position <= 0.7:
-                    bb_score = 4
-                else:
-                    bb_score = 0
-                
-                scores['bb_position'] = bb_score
-                total_score += bb_score
-                max_score += 8
+                # 位置を0-1の範囲で正規化 (0=下限、0.5=中央、1=上限)
+                if bb_upper_float > bb_lower_float:  # 分母がゼロにならないことを確認
+                    bb_position = (close_float - bb_lower_float) / (bb_upper_float - bb_lower_float)
+                    
+                    # 理想的な位置は0.3〜0.5（やや下方から中央）
+                    if 0.3 <= bb_position <= 0.5:
+                        bb_score = 8
+                    elif 0.1 <= bb_position < 0.3 or 0.5 < bb_position <= 0.7:
+                        bb_score = 4
+                    else:
+                        bb_score = 0
+                    
+                    scores['bb_position'] = bb_score
+                    total_score += bb_score
+                    max_score += 8
+            except (ValueError, TypeError) as e:
+                logger.error(f"{stock_code}: ボリンジャーバンド計算中にエラー: {e}")
     else:
         logger.warning(f"{stock_code}: テクニカル指標が不足しているため、スコアリングに影響します")
     
