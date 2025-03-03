@@ -22,7 +22,7 @@ def main():
     """
     # 今日が休日かどうかチェック
     today = datetime.datetime.now().date()
-    if is_holiday(today):
+    if is_holiday():
         logger.info(f"{today}は休日のため、処理をスキップします。")
         return
 
