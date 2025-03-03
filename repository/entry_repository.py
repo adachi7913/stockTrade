@@ -4,13 +4,13 @@ from datetime import datetime, date
 from .base_repository import BaseRepository
 
 class EntryRepository(BaseRepository):
-    def fetch_best_entry_candidates(self, min_score: int = 650, limit: int = 10) -> List[Dict]:
+    def fetch_best_entry_candidates(self, min_score: int = 700, limit: int = 400) -> List[Dict]:
         """
         エントリースコアが指定値以上のデータを一日辺りの期待リターンの降順で取得します
         
         Args:
-            min_score (int): 最小エントリースコア（デフォルト: 650）
-            limit (int): 取得する最大件数（デフォルト: 10）
+            min_score (int): 最小エントリースコア（デフォルト: 700）
+            limit (int): 取得する最大件数（デフォルト: 400）
             
         Returns:
             List[Dict]: エントリー候補のリスト

@@ -755,7 +755,7 @@ class RateLimiter:
                 self.logger.debug(f"レートリミット到達: {current_requests}件のリクエスト")
 
 class TachibanaStockAPI:
-    def __init__(self, num_threads=1, logger=None):
+    def __init__(self, num_threads=1, logger=None, execution_mode='daily'):
         # 外部から渡されたロガーを使用するか、デフォルトでモジュール名のロガーを使用
         self.logger = logger if logger is not None else logging.getLogger(__name__)
         self.repo = StockRepository()
@@ -766,7 +766,7 @@ class TachibanaStockAPI:
             time_window=1.0,
             logger=self.logger
         )
-        self.execution_mode = None
+        self.execution_mode = execution_mode  # 実行モード（'daily'または'full'）
         self.stop_requested = False
         
         # シグナルハンドラを設定
@@ -873,6 +873,9 @@ class TachibanaStockAPI:
                 if self.execution_mode == 'daily':
                     price_history = sorted(price_history, key=lambda x: x['sDate'], reverse=True)[:5]
                 
+                # 株価データを整形して保存用のリストを作成
+                formatted_prices = []
+                
                 # 日毎のデータをDBに保存
                 for daily_price in price_history:
                     try:
@@ -890,6 +893,8 @@ class TachibanaStockAPI:
                             'close': float(daily_price['pDPP']),
                             'volume': int(daily_price['pDV'])
                         }
+                        
+                        formatted_prices.append(price_data)  # 整形したデータを保存用リストに追加
                         
                         # DBに保存を試みる前にログ出力を追加
                         self.logger.debug(f"保存するデータ: {price_data}")
@@ -911,8 +916,12 @@ class TachibanaStockAPI:
                 self.logger.warning(f'銘柄コード {code} の株価データが取得できませんでした')
             
             if success:  # 株価データの保存が成功した場合
-                # インジケーター計算・保存を実行
-                indicator_success = self.calculate_and_save_indicators(code, industry_name)
+                # インジケーター計算・保存を実行（APIから取得した株価データを渡す）
+                indicator_success = self.calculate_and_save_indicators(
+                    code, 
+                    industry_name, 
+                    formatted_prices if self.execution_mode == 'full' else None
+                )
                 if indicator_success:
                     self.logger.info(f"銘柄コード {code} の全処理が完了しました")
             
@@ -1024,27 +1033,35 @@ class TachibanaStockAPI:
             except Exception as e:
                 self.logger.error(f'ログアウト中にエラーが発生しました: {str(e)}')
 
-    def calculate_and_save_indicators(self, code: str, industry_name: str):
+    def calculate_and_save_indicators(self, code: str, industry_name: str, price_data=None):
         """株価データを取得してインジケーターを計算・保存"""
         try:
-            # DBから株価データを取得（最新100営業日分）
-            price_data = self.repo.fetch_stock_prices(code, industry_name, limit=100)
-            
-            if not price_data:
-                self.logger.warning(f"銘柄コード {code} の株価データが見つかりません")
-                return False
-            
-            self.logger.info(f"銘柄コード {code} のインジケーター計算を開始します（データ数: {len(price_data)}日分）")
+            if price_data is None:
+                # dailyモードまたはprice_dataが渡されていない場合はDBから取得
+                price_data = self.repo.fetch_stock_prices(code, industry_name, limit=100)
+                
+                if not price_data:
+                    self.logger.warning(f"銘柄コード {code} の株価データが見つかりません")
+                    return False
+                
+                self.logger.info(f"銘柄コード {code} のインジケーター計算を開始します（データ数: {len(price_data)}日分）")
+            else:
+                # fullモードでAPIから取得したデータを使用
+                self.logger.info(f"銘柄コード {code} のインジケーター計算を開始します（全期間: {len(price_data)}日分）")
             
             # 日付でソート（古い順）
             price_data = sorted(price_data, key=lambda x: x['date'])
             
-            # インジケーター計算（デイリー処理用の軽量版）
+            # インジケーター計算
             from service.indicator_service import IndicatorService
             indicator_service = IndicatorService(self.repo)
             
-            # 直近5日分のインジケーターのみを計算・保存する
-            success = indicator_service.calculate_latest_indicators(price_data, code, industry_name, latest_days=5)
+            if self.execution_mode == 'daily':
+                # dailyモードは直近5日分のみ計算
+                success = indicator_service.calculate_latest_indicators(price_data, code, industry_name, latest_days=5)
+            else:
+                # fullモードは全期間計算
+                success = indicator_service.calculate_and_save_indicators(price_data, code, industry_name)
             
             if success:
                 self.logger.info(f"銘柄コード {code} のインジケーター計算・保存が完了しました")

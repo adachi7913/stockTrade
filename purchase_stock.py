@@ -41,7 +41,7 @@ class StockPurchaseManager:
     このクラスは同期処理を使用して、データ取得と処理を実現します。
     """
     
-    def __init__(self, max_ai_calls=5, min_entry_score=70.0, api_delay=30, test_mode=False):
+    def __init__(self, max_ai_calls=40, min_entry_score=70.0, api_delay=30, test_mode=False):
         """
         初期化処理
         
