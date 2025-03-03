@@ -2,7 +2,8 @@ import sys
 import os
 import threading
 from datetime import date, datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
+import json
 
 from lib.table_category import TableCategory
 from .base_repository import BaseRepository
@@ -368,6 +369,75 @@ class StockRepository(BaseRepository):
             return result if result else None
         except Exception as e:
             self.logger.error(f"エントリー不可情報取得エラー: {e}")
+            return None
+
+    def get_latest_api_response(self, code: str) -> Optional[Dict[str, Any]]:
+        """
+        指定された銘柄コードに対して、api_responseテーブルから最新のAPI応答を取得して返します。
+        取得したデータは、AIプロンプト生成時に使用する形式に変換します。
+
+        Args:
+            code (str): 銘柄コード（4桁）
+
+        Returns:
+            Optional[Dict[str, Any]]: 最新のAPI応答データを含む辞書、取得失敗時は None
+        """
+        try:
+            query = """
+            SELECT 
+                date, code, close, rule_entry_price, rule_stop_limit, 
+                rule_top_price, rule_period, risk_reward, no_entry_span, 
+                entry_score, expected_return, reason, 
+                entry_conditions, exit_conditions, 
+                market_analysis, technical_patterns, indicator_analysis
+            FROM api_response
+            WHERE code = %s
+            ORDER BY date DESC, update_when DESC
+            LIMIT 1;
+            """
+            
+            self.cur.execute(query, (code,))
+            row = self.cur.fetchone()
+            
+            if not row:
+                return None
+                
+            # JSONフィールドを処理
+            market_analysis = row[14]
+            if market_analysis and isinstance(market_analysis, str):
+                try:
+                    market_analysis = json.loads(market_analysis)
+                except (json.JSONDecodeError, TypeError):
+                    self.logger.warning(f"market_analysis JSONパース失敗: {market_analysis}")
+                    market_analysis = {}
+            else:
+                market_analysis = {}
+                
+            # 結果を返却用の辞書形式に変換
+            return {
+                'date': row[0].strftime('%Y-%m-%d') if row[0] else None,
+                'code': row[1],
+                'close': float(row[2]) if row[2] else None,
+                'rule': {
+                    'entryPrice': row[3],
+                    'stop_loss': row[4],
+                    'target_price': row[5],
+                    'period': row[6],
+                    'risk_reward': row[7]
+                },
+                'no_entry_span': row[8],
+                'entry_score': row[9],
+                'expected_return': float(row[10]) if row[10] else None,
+                'reason': row[11],
+                'entry_conditions': row[12],
+                'exit_conditions': row[13],
+                'market_analysis': market_analysis,
+                'technical_patterns': row[15],
+                'indicator_analysis': row[16]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"最新API応答データ取得エラー: {e}")
             return None
 
     def insert_indicator_data(self, indicator_data: Dict, code: str, industry_name: str) -> bool:
@@ -959,7 +1029,7 @@ class StockRepository(BaseRepository):
                     'rsi': float(row[12]) if row[12] is not None else None,
                     'macd': float(row[13]) if row[13] is not None else None,
                     'dynamic_threshold': float(row[14]) if row[14] is not None else None,
-                    'weekly_trend': row[15] if row[15] is not None else None,
+                    'weekly_trend': row[15],
                     'pca_signal': float(row[16]) if row[16] is not None else None
                 }
                 for row in rows

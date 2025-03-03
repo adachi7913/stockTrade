@@ -28,7 +28,8 @@ class PromptGenerator:
                              stock_data: Dict[str, Any], 
                              backtest_results: Dict[str, Any], 
                              technical_data: List[Dict[str, Any]], 
-                             entry_score: float) -> str:
+                             entry_score: float,
+                             api_response_data: Dict[str, Any] = None) -> str:
         """
         エントリー判断用のプロンプトを生成
         
@@ -37,6 +38,7 @@ class PromptGenerator:
             backtest_results (Dict): バックテスト結果の辞書
             technical_data (List[Dict]): テクニカル指標データのリスト（過去数日分）
             entry_score (float): 事前計算されたエントリースコア
+            api_response_data (Dict): api_responseテーブルから取得した追加データ（オプション）
             
         Returns:
             str: 生成されたプロンプト
@@ -63,8 +65,49 @@ class PromptGenerator:
 - 企業名: {company_name}
 - 現在価格: {current_price}円
 - 事前スコア: {entry_score:.1f}/100
+"""
 
-## 重要テクニカル指標（過去3日間）
+        # api_responseテーブルからのデータがあれば追加
+        if api_response_data:
+            # ルール情報
+            rule = api_response_data.get('rule', {})
+            entry_price = rule.get('entryPrice', 'NG')
+            stop_loss = rule.get('stop_loss', 'NG')
+            target_price = rule.get('target_price', 'NG')
+            period = rule.get('period', 'NG')
+            risk_reward = rule.get('risk_reward', 'NG')
+            
+            # 前回の判断を追加
+            prompt += f"""
+## 前回の判断情報
+- エントリースコア: {api_response_data.get('entry_score', 'なし')}
+- 判断理由: {api_response_data.get('reason', 'なし')}
+- エントリー価格: {entry_price}
+- ストップロス: {stop_loss}
+- 利確目標: {target_price}
+- 推奨保有期間: {period}日
+- リスクリワード比: {risk_reward}
+
+### エントリー条件
+{api_response_data.get('entry_conditions', 'なし')}
+
+### 決済条件
+{api_response_data.get('exit_conditions', 'なし')}
+
+### 市場分析
+- 短期トレンド: {api_response_data.get('market_analysis', {}).get('short_term_trend', 'なし')}
+- 中期トレンド: {api_response_data.get('market_analysis', {}).get('mid_term_trend', 'なし')}
+- 長期トレンド: {api_response_data.get('market_analysis', {}).get('long_term_trend', 'なし')}
+- サポート/レジスタンス: {api_response_data.get('market_analysis', {}).get('support_resistance', 'なし')}
+
+### テクニカルパターン
+{api_response_data.get('technical_patterns', 'なし')}
+
+### 指標分析
+{api_response_data.get('indicator_analysis', 'なし')}
+
+### 再判断までの日数
+{api_response_data.get('no_entry_span', 'なし')}日
 """
 
         # 直近3日分の重要な指標を抽出（少ないデータ量で効果的な情報を提供）
@@ -125,7 +168,27 @@ class PromptGenerator:
   "should_enter": true/false,
   "confidence": 0-100,
   "reasoning": "判断理由を簡潔に説明",
-  "concerns": "潜在的な懸念事項があれば記載"
+  "concerns": "潜在的な懸念事項があれば記載",
+  "entry_score": <0〜1000の整数>,
+  "reason": "エントリー判断の理由及び各段階での点数根拠",
+  "rule": {{
+    "entryPrice": "エントリー価格（金額のみ）" or "NG",
+    "stop_loss": "ストップロス価格（金額のみ）" or "NG",
+    "target_price": "利確目標（金額のみ）" or "NG",
+    "period": "推奨保有期間（整数:1 - 14）" or "NG",
+    "risk_reward": "リスクリワード比（計算結果）" or "NG"
+  }},
+  "entry_conditions": "具体的なエントリートリガー条件を箇条書きで記述",
+  "exit_conditions": "具体的な決済条件を箇条書きで記述",
+  "market_analysis": {{
+    "short_term_trend": "短期トレンドの方向と強さ",
+    "mid_term_trend": "中期トレンドの方向と強さ",
+    "long_term_trend": "長期トレンドの方向と強さ",
+    "support_resistance": "主要なサポート/レジスタンスレベル" 
+  }},
+  "technical_patterns": "検出されたチャートパターンと価格形成の特徴",
+  "indicator_analysis": "複数指標の総合分析結果",
+  "no_entry_span": <再判断までの日数（整数:1 - 14）>
 }}
 ```
 """
