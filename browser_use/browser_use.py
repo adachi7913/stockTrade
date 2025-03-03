@@ -202,7 +202,7 @@ class BrowserUse:
             llm_base_url="",                              # ベース URL（必要に応じて）
             llm_api_key=os.environ.get("GEMINI_API_KEY2"),                               # API キー（必要に応じて）
             use_own_browser=True,                        # ブラウザ利用オプション
-            keep_browser_open=True,                       # ブラウザを開いたままにするかどうか
+            keep_browser_open=False,                     # ブラウザを開いたままにするかどうか
             headless=True,                               # ヘッドレスモードかどうか
             disable_security=True,                        # セキュリティ機能の無効化
             window_w=1280,                                # ブラウザウィンドウの幅
