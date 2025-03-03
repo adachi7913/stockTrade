@@ -503,7 +503,8 @@ class StockPurchaseManager:
                         stock_data=candidate,
                         backtest_results=backtest_results,
                         technical_data=historical_data,
-                        entry_score=entry_score
+                        entry_score=entry_score,
+                        api_response_data=candidate  # candidatesに含まれる新しい項目を直接使用
                     )
                 
                 # プロンプト生成前の最新技術指標データを確認

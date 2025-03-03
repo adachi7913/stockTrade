@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List, Dict, Optional, Any
 from datetime import datetime, date
 from .base_repository import BaseRepository
@@ -38,7 +39,10 @@ class EntryRepository(BaseRepository):
             SELECT 
                 code, date, close, rule_entry_price, rule_stop_limit,
                 rule_top_price, rule_period, risk_reward, entry_score,
-                expected_return, reason
+                expected_return, reason, entry_conditions, exit_conditions,
+                short_term_trend, mid_term_trend, long_term_trend,
+                support_resistance, technical_patterns, indicator_analysis,
+                no_entry_span
             FROM api_response
             WHERE entry_score >= %s
             ORDER BY CASE 
@@ -63,7 +67,18 @@ class EntryRepository(BaseRepository):
                 'risk_reward': row[7],
                 'entry_score': row[8],
                 'expected_return': row[9],
-                'reason': row[10]
+                'reason': row[10],
+                'entry_conditions': row[11],
+                'exit_conditions': row[12],
+                'market_analysis': {
+                    'short_term_trend': row[13],
+                    'mid_term_trend': row[14],
+                    'long_term_trend': row[15],
+                    'support_resistance': row[16]
+                },
+                'technical_patterns': row[17],
+                'indicator_analysis': row[18],
+                'no_entry_span': row[19]
             } for row in rows]
 
         except Exception as e:

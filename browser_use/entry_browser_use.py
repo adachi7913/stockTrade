@@ -87,22 +87,23 @@ class EntryBrowserUse(BrowserUse):
 
 4.株価検索のテキストボックスに{entry_data['code']}を入力し、右隣の株価検索ボタンをクリック
 5.現物買ボタンをクリック
-6.IDOCOボタンをクリック
-7.IFD１の株数に{quantity}を入力
-価格が指値・条件なしになっていることを確認
-右側のテキストボックスに{entry_data['entry_price']}と入力。
-8.IFD１の期間は、期間指定を選択
-9.右側の日付は{entry_data['date']}に最も近い日付を選択
-10.預かり区分はNISA預かりに変更する
-11.IFD２のOCO１は「条件なし」の{entry_data['target_price']}になるように入力
-12.OCO２の逆指値は{entry_data['stop_loss']}と入力
-13.OCO２の成行を選択
-14.OCO2の期間は、期間指定を選択
-15.OCO2日付は{entry_data['date']}に最も近い日付を選択
-16.取引パスワードに{self._get_tread_password()}を入力
-17.「注文確認画面を省略」にチェックを入れる
-18.注文発注ボタンをクリック
-19.注文が完了したら、注文の約定状況を確認し、以下のいずれかの結果を返してください：
+6.IFDOCOボタンをクリック
+7.FDOCOボタンが選択されていることを確認。されていなければ再度選択
+8.IFD1の株数に{quantity}を入力
+9.価格が指値・条件なしになっていることを確認
+10.IFD1の右側のテキストボックス（価格）に{entry_data['entry_price']}と入力。
+11.IFD1の期間は、期間指定を選択
+12.右側の日付は{entry_data['date']}に最も近い日付を選択
+13.預かり区分はNISA預かりに変更する
+14.IFD2のOCO1は「条件なし」の{entry_data['target_price']}になるように入力
+15.OCO2の逆指値は{entry_data['stop_loss']}と入力
+16.OCO2の成行を選択
+17.OCO2の期間は、期間指定を選択
+18.OCO2日付は{entry_data['date']}に最も近い日付を選択
+19.取引パスワードに{self._get_tread_password()}を入力
+20.「注文確認画面を省略」にチェックを入れる
+21.注文発注ボタンをクリック
+22.注文が完了したら、注文の約定状況を確認し、以下のいずれかの結果を返してください：
            - 注文完了時: {{"success": true, "message": "注文が完了しました"}}
            - 注文失敗時: {{"success": false, "message": "エラーの内容"}}
 """
