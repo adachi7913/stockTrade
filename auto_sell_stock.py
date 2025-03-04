@@ -595,36 +595,38 @@ class AutoSellStock:
         Args:
             output_file (str, optional): 出力ファイルパス。指定がない場合は自動生成
         """
-        # ロギングを追加: メソッド呼び出し時の情報
-        self.logger.debug(f"save_test_report メソッド呼び出し: test_mode={self.test_mode}, test_results件数={len(self.test_results) if self.test_results else 0}, output_file={output_file}")
-        
         if not self.test_mode or not self.test_results:
             self.logger.warning("テストモードでないか、テスト結果がないためレポートは保存しません")
             return
-            
+        
         try:
+            # 現在時刻を取得
+            now = datetime.datetime.now()
+            
+            # レポート保存ディレクトリの設定
+            report_dir = os.path.join(
+                "report",
+                now.strftime("%Y"),
+                now.strftime("%m"),
+                now.strftime("%d")
+            )
+            
+            # ディレクトリが存在しない場合は作成
+            os.makedirs(report_dir, exist_ok=True)
+            
             # 出力ファイル名の生成
             if not output_file:
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 mode_prefix = "force_sell_test" if self.force_sell_test else "sell_test"
-                output_file = f"{mode_prefix}_report_{timestamp}.csv"
+                output_file = f"{mode_prefix}_report_{now.strftime('%Y%m%d_%H%M')}.csv"
                 self.logger.debug(f"出力ファイル名を自動生成: {output_file}")
             
-            # レポート保存ディレクトリの設定とチェック
-            report_dir = "report"
-            if not os.path.exists(report_dir):
-                self.logger.info(f"レポートディレクトリ '{report_dir}' が存在しないため作成します")
-                os.makedirs(report_dir)
+            # 出力ファイルのフルパスを生成
+            output_path = os.path.join(report_dir, output_file)
+            self.logger.debug(f"出力ファイルのフルパス: {output_path}")
             
-            if not os.path.isabs(output_file):
-                output_file = os.path.join(report_dir, output_file)
-                self.logger.debug(f"相対パスを絶対パスに変換: {output_file}")
-            
-            # ファイル保存前のテスト結果サマリーをログ出力
-            self.logger.debug(f"保存テスト結果: {len(self.test_results)}件, 最初の銘柄={self.test_results[0]['code'] if self.test_results else 'なし'}")
-            
-            with open(output_file, 'w', encoding='utf-8') as f:
-                self.logger.debug(f"ファイル {output_file} を書き込みモードでオープン")
+            # ファイルに書き込み
+            with open(output_path, 'w', encoding='utf-8') as f:
+                self.logger.debug(f"ファイル {output_path} を書き込みモードでオープン")
                 if self.force_sell_test:
                     f.write("===== 強制売却テストレポート =====\n")
                 else:
@@ -647,12 +649,13 @@ class AutoSellStock:
                     
                     f.write(f"{code},{lot_size},{entry_price:.1f},{exit_price:.1f},{profit:.1f},{profit_rate:.2f},{reason}\n")
                 
-            self.logger.info(f"テストレポートを {output_file} に保存しました")
+            self.logger.info(f"テストレポートを {output_path} に保存しました")
+            
             # ファイルが実際に存在するか確認
-            if os.path.exists(output_file):
-                self.logger.debug(f"ファイル {output_file} の存在を確認: サイズ={os.path.getsize(output_file)}バイト")
+            if os.path.exists(output_path):
+                self.logger.debug(f"ファイル {output_path} の存在を確認: サイズ={os.path.getsize(output_path)}バイト")
             else:
-                self.logger.error(f"エラー: ファイル {output_file} が存在しません")
+                self.logger.error(f"エラー: ファイル {output_path} が存在しません")
             
         except Exception as e:
             self.logger.error(f"テストレポート保存中にエラー: {e}", exc_info=True)
