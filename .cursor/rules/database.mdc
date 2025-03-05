@@ -1,3 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
 # stockTradeプロジェクトのデータベーススキーマ
 
 ## メインテーブル
@@ -192,6 +197,11 @@ API応答結果のバックアップテーブル
 | risk_reward | numeric(10,2) | YES | - | リスク/リワード比 |
 | quantity | integer | YES | - | 数量 |
 | status | varchar(20) | YES | - | ステータス |
+| exit_date | date | YES | - | 売却日 |
+| exit_price | numeric(10,2) | YES | - | 売却価格 |
+| profit | numeric(10,2) | YES | - | 利益額 |
+| profit_rate | numeric(5,2) | YES | - | 利益率（%） |
+| exit_reason | text | YES | - | 売却理由 |
 | created_at | timestamp | NO | CURRENT_TIMESTAMP | 作成日時 |
 | updated_at | timestamp | NO | CURRENT_TIMESTAMP | 更新日時 |
 
