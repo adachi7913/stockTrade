@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import glob
 import os
 import sys
@@ -8,10 +11,14 @@ import logging
 from datetime import datetime
 from utils.logging_config import setup_logging, cleanup_old_logs
 
+# 標準出力と標準エラー出力のエンコーディングをUTF-8に設定
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 def main():
     # ロギング設定
-    logger = setup_logging("tachibana")
-    logger.info("立花証券APIテストを開始します")
+    logger = setup_logging("daily")
+    logger.info("日次株価データ更新処理を開始します")
     
     # tachibana_stock_api_base のロガーレベルを設定
     api_logger = logging.getLogger('lib.tachibana_stock_api_base')
@@ -31,7 +38,7 @@ def main():
         logger.info("立花証券APIにログインします")
         try:
             api.execute_stock_price_retrieval(start_code)
-            logger.info("API処理が完了しました")
+            logger.info("株価データ更新処理が完了しました")
         except AttributeError as ae:
             logger.error(f"メソッド呼び出しエラー: {ae}")
             logger.error(f"詳細: {traceback.format_exc()}")
@@ -43,7 +50,7 @@ def main():
         logger.error(f"エラーが発生しました: {e}")
         logger.error(f"詳細なエラー情報: {traceback.format_exc()}")
     
-    logger.info("立花証券APIテストを終了します")
+    logger.info("日次株価データ更新処理を終了します")
 
 def test_single_stock():
     """1銘柄のみを処理してインジケーター計算をテスト"""
