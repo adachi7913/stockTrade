@@ -1,16 +1,27 @@
+import os
+import sys
+from pathlib import Path
+
+# プロジェクトルートディレクトリをPythonパスに追加
+project_root = str(Path(__file__).parent.parent.parent)
+sys.path.append(project_root)
+
+import logging
 from browser_use.browser_use import BrowserUse
 from repository.stock_repository import StockRepository
 from lib.table_category import TableCategory
 from Gemini.api_handler import ApiHandler
 from models.evaluation_result import EvaluationResult
 from lib.code_validator import validate_stock_code
+from utils.logging_config import setup_logging
 import json
 from typing import Optional, Dict, List
 import argparse
 
 class AutoSellStock:
-    def __init__(self, logger: logging.Logger):
+    def __init__(self, logger: logging.Logger, test_mode: bool = False):
         self.logger = logger
+        self.test_mode = test_mode
         self.browser_use = BrowserUse()
         self.stock_repository = StockRepository()
         self.api_handler = None
@@ -287,7 +298,7 @@ def main():
 
     try:
         # AutoSellStockインスタンスの作成
-        auto_sell = AutoSellStock(logger)
+        auto_sell = AutoSellStock(logger, test_mode=args.test)
         
         # 保有証券の評価を実行
         evaluation_results = auto_sell.run_evaluation()
