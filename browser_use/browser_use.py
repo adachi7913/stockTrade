@@ -62,14 +62,51 @@ class BrowserUse:
                     try:
                         webui_path = Path("C:/Users/hp/Documents/web-ui-main/webui.py")
                         if webui_path.exists():
-                            subprocess.Popen([sys.executable, str(webui_path)],
-                                          creationflags=subprocess.CREATE_NEW_CONSOLE)
+                            # WebUIのディレクトリに移動
+                            webui_dir = webui_path.parent
+                            current_dir = os.getcwd()
+                            os.chdir(webui_dir)
+                            
+                            # プロジェクトルートを取得
+                            project_root = Path(__file__).parent.parent
+                            
+                            # WebUIのPythonパスにbrowser_useモジュールを追加
+                            pythonpath = os.getenv("PYTHONPATH", "")
+                            if pythonpath:
+                                pythonpath = f"{project_root};{pythonpath}"
+                            else:
+                                pythonpath = str(project_root)
+                            
+                            # 環境変数を設定
+                            env = os.environ.copy()
+                            env["PYTHONPATH"] = pythonpath
+                            
+                            # WebUIを起動
+                            process = subprocess.Popen(
+                                [sys.executable, str(webui_path)],
+                                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                env=env
+                            )
+                            
                             self.logger.info(f"WebUIの起動を待機します（{webui_startup_delay}秒）")
                             time.sleep(webui_startup_delay)  # WebUIの起動を待つ
+                            
+                            # プロセスが正常に起動しているか確認
+                            if process.poll() is not None:
+                                stdout, stderr = process.communicate()
+                                self.logger.error(f"WebUIの起動に失敗: {stderr}")
+                                raise RuntimeError("WebUIの起動に失敗しました")
+                            
+                            # 元のディレクトリに戻る
+                            os.chdir(current_dir)
                         else:
                             self.logger.error(f"WebUIが見つかりません: {webui_path}")
                     except Exception as e:
                         self.logger.error(f"WebUIの起動に失敗: {e}")
+                        raise
 
                 # クライアントの初期化を試みる
                 self.logger.info(f"Gradioクライアントの初期化を試みます (試行 {attempt + 1}/{max_retries + 1})")
@@ -85,6 +122,64 @@ class BrowserUse:
                 else:
                     self.logger.error("最大リトライ回数に達しました")
                     raise
+
+    def _launch_webui(self):
+        """WebUIを起動する"""
+        try:
+            # 既存のChromeプロセスを終了
+            self._terminate_chrome()
+            
+            # WebUIのディレクトリを取得
+            webui_dir = Path(os.getenv("WEBUI_DIR", "C:/Users/hp/Documents/web-ui-main"))
+            
+            # プロジェクトルートを取得
+            project_root = Path(__file__).parent.parent
+            
+            # WebUIのPythonパスにbrowser_useモジュールを追加
+            pythonpath = os.getenv("PYTHONPATH", "")
+            if pythonpath:
+                pythonpath = f"{project_root};{pythonpath}"
+            else:
+                pythonpath = str(project_root)
+            
+            # 環境変数を設定
+            env = os.environ.copy()
+            env["PYTHONPATH"] = pythonpath
+            
+            # 現在の作業ディレクトリを保存
+            original_dir = os.getcwd()
+            
+            # WebUIのディレクトリに移動
+            os.chdir(webui_dir)
+            
+            # WebUIを起動
+            self.logger.info("WebUIを起動します")
+            process = subprocess.Popen(
+                [sys.executable, "webui.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env
+            )
+            
+            # プロセスの状態を確認
+            if process.poll() is not None:
+                # エラー出力を取得
+                _, stderr = process.communicate()
+                self.logger.error(f"WebUIの起動に失敗: {stderr}")
+                raise RuntimeError("WebUIの起動に失敗しました")
+            
+            # 元のディレクトリに戻る
+            os.chdir(original_dir)
+            
+            # WebUIの起動を待機
+            self.logger.info("WebUIの起動を待機します（30秒）")
+            time.sleep(30)  # WebUIの起動を待機
+            
+            return process
+        except Exception as e:
+            self.logger.error(f"WebUIの起動に失敗: {str(e)}")
+            raise
 
     def _get_prompt(self):
         user_name = os.environ.get("SBI_USER_NAME")
