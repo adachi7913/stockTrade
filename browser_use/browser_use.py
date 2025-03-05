@@ -6,14 +6,85 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime
 from utils.logging_config import setup_logging, cleanup_old_logs
+import sys
+import subprocess
+import time
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
 
 # .envファイルをロード
 load_dotenv()
 
+# 文字コードをUTF-8に設定
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
+# ロガーの設定
+logger = setup_logging("browser_use")
+logger.setLevel(logging.INFO)
+
+# ファイルハンドラーの設定
+log_dir = Path("log")
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / "browser_use.log"
+file_handler = logging.FileHandler(log_file, encoding='utf-8')
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(file_handler)
+
 class BrowserUse:
     def __init__(self):
-        self.client = Client("http://localhost:7788/")
-        self.logger = setup_logging("sbi_scraping")
+        self.logger = logger
+        self.client = self._initialize_client()
+        self.logger.info("Gradioクライアントの初期化が完了しました")
+
+    def _initialize_client(self) -> Client:
+        """Gradioクライアントの初期化を行う"""
+        max_retries = 2
+        retry_delay = 60  # 秒
+        webui_startup_delay = 30  # WebUI起動待機時間（秒）
+
+        for attempt in range(max_retries + 1):
+            try:
+                # 既存のChromeプロセスを終了
+                if attempt > 0:
+                    self.logger.info("既存のChromeプロセスを終了します")
+                    try:
+                        subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], 
+                                     capture_output=True, 
+                                     text=True)
+                        time.sleep(5)  # プロセス終了を待つ
+                    except Exception as e:
+                        self.logger.warning(f"Chromeプロセス終了中にエラーが発生: {e}")
+
+                # WebUIの起動を試みる
+                if attempt > 0:
+                    self.logger.info("WebUIを起動します")
+                    try:
+                        webui_path = Path("C:/Users/hp/Documents/web-ui-main/webui.py")
+                        if webui_path.exists():
+                            subprocess.Popen([sys.executable, str(webui_path)],
+                                          creationflags=subprocess.CREATE_NEW_CONSOLE)
+                            self.logger.info(f"WebUIの起動を待機します（{webui_startup_delay}秒）")
+                            time.sleep(webui_startup_delay)  # WebUIの起動を待つ
+                        else:
+                            self.logger.error(f"WebUIが見つかりません: {webui_path}")
+                    except Exception as e:
+                        self.logger.error(f"WebUIの起動に失敗: {e}")
+
+                # クライアントの初期化を試みる
+                self.logger.info(f"Gradioクライアントの初期化を試みます (試行 {attempt + 1}/{max_retries + 1})")
+                client = Client("http://localhost:7788/")
+                self.logger.info("Gradioクライアントの初期化に成功しました")
+                return client
+
+            except Exception as e:
+                self.logger.error(f"Gradioクライアントの初期化に失敗: {e}")
+                if attempt < max_retries:
+                    self.logger.info(f"{retry_delay}秒後に再試行します")
+                    time.sleep(retry_delay)
+                else:
+                    self.logger.error("最大リトライ回数に達しました")
+                    raise
 
     def _get_prompt(self):
         user_name = os.environ.get("SBI_USER_NAME")
