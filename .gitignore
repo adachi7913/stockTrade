@@ -21,3 +21,6 @@ adx_analysis.py
 *.csv
 *.bat
 .TODO
+recovery_state.txt
+temp_prices/
+
