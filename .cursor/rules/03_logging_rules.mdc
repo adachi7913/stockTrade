@@ -1,3 +1,8 @@
+---
+description: ログ設定ルール
+globs: 
+alwaysApply: false
+---
 # ロギング設定ルール
 
 ## 基本方針

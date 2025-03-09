@@ -1,3 +1,8 @@
+---
+description: 銘柄コード取り扱いルール
+globs: 
+alwaysApply: false
+---
 # 銘柄コード管理の特殊仕様
 
 ## 基本ルール

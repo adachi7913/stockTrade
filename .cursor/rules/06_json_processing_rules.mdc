@@ -1,3 +1,8 @@
+---
+description: JSON加工ルール
+globs: 
+alwaysApply: false
+---
 # JSON処理のルール
 
 ## 基本方針
