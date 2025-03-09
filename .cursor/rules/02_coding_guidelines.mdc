@@ -1,3 +1,8 @@
+---
+description: 技術スタック・コーディング規約
+globs: 
+alwaysApply: false
+---
 # コーディングガイドライン
 
 ## Python

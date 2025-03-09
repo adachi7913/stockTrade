@@ -559,15 +559,16 @@ class StockPurchaseManager:
                     self.logger.info(f"候補 {stock_code} はエントリー見送り: {judgment.get('reasoning', 'No reasoning provided')}")
                     continue
 
+                # エントリー情報の共通設定
+                from datetime import datetime
+                candidate['entry_date'] = datetime.now().strftime('%Y-%m-%d')
+
                 # 5. 推奨された候補についてエントリーを実行
                 if self.test_mode:
                     self.logger.info(f"テストモード: 候補 {stock_code} の実際の購入処理をスキップします")
-                    # テストモードでもエントリー成功とみなす
-                    any_success = True
-                    
-                    # テストモードでもエントリー情報を保存（テスト用のフラグ付き）
                     candidate['is_test'] = True
                     self.entry_repository.save_entry_info(candidate)
+                    any_success = True
                 else:
                     # ブラウザ操作クラスが初期化されていない場合はエラーを出力
                     if self.browser_handler is None:
@@ -576,7 +577,6 @@ class StockPurchaseManager:
                         
                     success = self.browser_handler.execute_entry(candidate)
                     if success:
-                        # エントリー情報を保存
                         self.entry_repository.save_entry_info(candidate)
                         self.logger.info(f"エントリー成功: {stock_code}")
                         any_success = True

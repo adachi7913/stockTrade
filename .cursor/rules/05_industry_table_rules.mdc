@@ -1,3 +1,8 @@
+---
+description: 業種名取得時の注意
+globs: 
+alwaysApply: false
+---
 # 業種別テーブルアクセスの特殊仕様
 
 ## 概要
