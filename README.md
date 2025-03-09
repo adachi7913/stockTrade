@@ -8,16 +8,20 @@ stockTrade/
 │   ├── daily/           # 日次実行系
 │   │   ├── daily_update.py          # 立花証券APIを使用した日次株価更新
 │   │   ├── daily_update_yfinance.py # yFinanceを使用した日次株価更新（現在は非使用）
-│   │   └── auto_sell_stock.py       # 自動売却機能
+│   │   ├── auto_sell_stock.py       # 自動売却機能
+│   │   └── purchase_stock.py        # 自動購入機能
 │   ├── test/            # テスト実行系
 │   │   └── test_tachibana_api.py    # 立花証券APIのテスト
 │   └── tools/           # その他のツール系
 │
 ├── batch/            # バッチファイル（.bat）を格納
 │   ├── daily/           # 日次実行系のバッチ
-│   │   └── run_daily_update.bat     # 日次株価更新の実行
+│   │   ├── run_daily_update.bat     # 日次株価更新の実行
+│   │   ├── auto_sell_stock.bat      # 自動売却機能の本番実行（対話モード）
+│   │   └── purchase_stock.bat        # 自動購入機能の本番実行
 │   ├── test/            # テスト実行系のバッチ
-│   └── tools/           # その他のツール系のバッチ
+│   │   └── auto_sell_stock_simulation_test.bat  # 自動売却機能のシミュレーション実行
+│   └── purchase_stock_test.bat   # 自動購入機能のテスト実行
 │
 ├── lib/              # ライブラリ
 ├── service/          # サービス層
@@ -58,6 +62,55 @@ python bin/daily/auto_sell_stock.py --force-sell
 # デバッグモード
 python bin/daily/auto_sell_stock.py --debug
 ```
+
+### 自動購入機能
+
+```batch
+# 本番実行
+batch/daily/purchase_stock.bat
+
+# テスト実行（購入をシミュレーション）
+batch/test/purchase_stock_test.bat
+```
+
+#### コマンドライン引数
+- `--max-calls <数値>`: AI判断の最大件数（デフォルト: 50件）
+- `--min-score <数値>`: エントリースコアの最低値（デフォルト: 70.0）
+- `--api-delay <秒数>`: API呼び出し間の待機時間（デフォルト: 30秒）
+- `--test-mode`: テストモードの有効化（実際の購入処理をスキップ）
+
+#### 環境変数による制御
+1. **必須の環境変数**
+   - `GEMINI_API_KEY`: Gemini APIのアクセスキー
+   - `GEMINI_PRO_MODEL`: 使用するモデルのバージョン
+
+2. **オプションの環境変数**
+   - `STOCK_TEST_MODE`: テストモードの制御（'true'/'false'）
+   - `USE_SIMPLIFIED_PROMPT`: 簡略化プロンプトの使用（'true'/'false'）
+
+#### 動作モード
+1. **通常モード**
+   - 実際の購入処理まで実行
+   - ブラウザ操作を含む
+   - エントリー情報をDBに保存
+
+2. **テストモード**
+   - 購入処理をシミュレーションのみ
+   - ブラウザ操作なし
+   - テストフラグ付きでエントリー情報を保存
+
+#### 処理フロー
+1. エントリー候補の取得
+2. 基本フィルタリングによる候補の絞り込み
+3. 候補のスコアリングと上位候補の選択
+4. AIによるエントリー判断
+5. 推奨された候補の購入処理実行
+
+#### 注意事項
+- テストモードでは実際の購入は行われません
+- API呼び出しには適切な間隔（デフォルト30秒）が必要です
+- エントリースコアが最低値（デフォルト70.0）未満の候補は除外されます
+- 環境変数の設定は`.env`ファイルで管理することを推奨します
 
 ### マテリアライズドビューの更新
 
