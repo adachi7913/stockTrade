@@ -1,10 +1,15 @@
-import logging
-from typing import Dict, List
 import os
+import sys
+
+# ルートディレクトリの取得とPythonパスの設定
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # 3階層上がルート
+sys.path.insert(0, root_dir)  # 最優先でルートディレクトリを検索パスに追加
+print(f"ルートディレクトリ: {root_dir}")
+os.chdir(root_dir)  # カレントディレクトリの移動
+
+from typing import Dict, List
 from dotenv import load_dotenv
 import time
-import datetime
-import heapq
 
 from repository.entry_repository import EntryRepository
 from Gemini.entry_judgment_handler import EntryJudgmentHandler
