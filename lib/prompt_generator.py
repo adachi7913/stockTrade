@@ -29,6 +29,7 @@ class PromptGenerator:
                              backtest_results: Dict[str, Any], 
                              technical_data: List[Dict[str, Any]], 
                              entry_score: float,
+                             available_funds: float,  # 買付余力
                              api_response_data: Dict[str, Any] = None) -> str:
         """
         エントリー判断用のプロンプトを生成
@@ -38,6 +39,7 @@ class PromptGenerator:
             backtest_results (Dict): バックテスト結果の辞書
             technical_data (List[Dict]): テクニカル指標データのリスト（過去数日分）
             entry_score (float): 事前計算されたエントリースコア
+            available_funds (float): 買付余力（利用可能な現金）
             api_response_data (Dict): api_responseテーブルから取得した追加データ（オプション）
             
         Returns:
@@ -56,6 +58,9 @@ class PromptGenerator:
         company_name = stock_data.get('company_name', 'unknown')
         current_price = stock_data.get('close', 0)
         
+        # 購入可能な最大株数を計算（100株単位）
+        max_possible_lots = available_funds // (current_price * 100)
+        
         # プロンプトを構築する
         prompt = f"""
 # 株式エントリー判断リクエスト
@@ -63,8 +68,16 @@ class PromptGenerator:
 ## 基本情報
 - 銘柄コード: {stock_code}
 - 企業名: {company_name}
-- 現在価格: {current_price}円
+- 現在価格: {current_price:,}円
 - 事前スコア: {entry_score:.1f}/100
+
+## 買付余力情報
+- 利用可能資金: {available_funds:,}円
+- 購入可能最大株数: {max_possible_lots * 100:,}株（100株単位）
+
+注意事項:
+- 購入株数は100株単位で指定（最小:100株）
+- 株価 × 購入株数が利用可能資金を超えないこと
 """
 
         # api_responseテーブルからのデータがあれば追加
@@ -161,6 +174,7 @@ class PromptGenerator:
 1. 上記の指標は買い時を示しているか
 2. バックテスト結果は良好か
 3. 現在のリスク/リターン比は良好か
+4. 現在の資金に応じた、適切な購入株数（最小:100株、以降100株単位の整数）
 
 以下の形式で回答してください:
 ```json
@@ -176,7 +190,8 @@ class PromptGenerator:
     "stop_loss": "ストップロス価格（金額のみ）" or "NG",
     "target_price": "利確目標（金額のみ）" or "NG",
     "period": "推奨保有期間（整数:1 - 14）" or "NG",
-    "risk_reward": "リスクリワード比（計算結果）" or "NG"
+    "risk_reward": "リスクリワード比（計算結果）" or "NG",
+    "quantity": "推奨購入株数（整数）" or "NG"
   }},
   "entry_conditions": "具体的なエントリートリガー条件を箇条書きで記述",
   "exit_conditions": "具体的な決済条件を箇条書きで記述",
@@ -251,12 +266,17 @@ class PromptGenerator:
 - ATR: {atr if atr is not None else '不明'}
 
 この銘柄は購入すべきですか？理由と共に回答してください。
+購入株数は最小100株、以降100株単位の整数で指定してください。
+
 以下のJSON形式で回答:
 {{
   "should_enter": true/false,
   "confidence": 0-100,
   "reasoning": "理由",
-  "concerns": "懸念点"
+  "concerns": "懸念点",
+  "rule": {{
+    "quantity": "推奨購入株数（最小:100株、以降100株単位の整数）" or "NG"
+  }}
 }}
 """
         
@@ -429,6 +449,7 @@ class PromptGenerator:
 4. バックテスト結果はこのエントリー戦略を支持しているか
 5. エントリー条件と決済条件の論理性と明確さ
 6. 市場概況・技術分析とエントリールールの整合性
+7. 推奨購入株数は適切か（最小:100株、以降100株単位の整数）
 
 以下の形式で回答してください:
 ```json
@@ -438,7 +459,10 @@ class PromptGenerator:
   "reasoning": "エントリールールの評価理由を簡潔に説明",
   "rule_evaluation": "エントリールールの強み・弱みについてのコメント",
   "current_match": "現在の市場状況とエントリールールの一致度(0-100)",
-  "concerns": "潜在的な懸念事項があれば記載"
+  "concerns": "潜在的な懸念事項があれば記載",
+  "rule": {{
+    "quantity": "推奨購入株数（最小:100株、以降100株単位の整数）" or "NG"
+  }}
 }}
 ```
 """
@@ -478,7 +502,7 @@ if __name__ == "__main__":
     entry_score = 75.5
     
     # プロンプト生成テスト
-    prompt = generator.generate_entry_prompt(stock_data, backtest_results, technical_data, entry_score)
+    prompt = generator.generate_entry_prompt(stock_data, backtest_results, technical_data, entry_score, 1000000)
     print(prompt)
     
     # 簡略化プロンプト

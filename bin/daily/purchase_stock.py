@@ -449,19 +449,29 @@ class StockPurchaseManager:
         株式購入処理を実行
 
         処理フロー:
-        1. エントリー候補の取得
-           - 複数の候補を取得し、候補が見つからない場合は処理を中断
-        2. 基本フィルタリングで候補を絞り込み
-        3. 残った候補にスコアを付け、上位候補を選択
-        4. 選択された候補に対してAIによるエントリー判断を実施
-        5. 推奨された候補について実際の購入処理を実行
-        6. 1件でも購入が成功すれば True を返し、すべて失敗の場合は False を返す
+        1. 買付余力の確認
+        2. エントリー候補の取得
+        3. 基本フィルタリングで候補を絞り込み
+        4. 残った候補にスコアを付け、上位候補を選択
+        5. 選択された候補に対してAIによるエントリー判断を実施
+        6. 推奨された候補について実際の購入処理を実行
+        7. 1件でも購入が成功すれば True を返し、すべて失敗の場合は False を返す
 
         Returns:
             bool: 購入成功で True、すべて失敗または候補がない場合は False
         """
         try:
-            # 1. エントリー候補を全件取得
+            # 1. 買付余力を取得
+            self.logger.info("買付余力の確認")
+            available_funds = self.entry_repository.get_available_funds()
+            
+            if available_funds <= 0:
+                self.logger.warning("買付余力がありません")
+                return False
+            
+            self.logger.info(f"買付余力: {available_funds:,}円")
+
+            # 2. エントリー候補を全件取得
             self.logger.info("エントリー候補の取得を開始")
             candidates = self._get_entry_candidate()
             if not candidates:
@@ -469,7 +479,7 @@ class StockPurchaseManager:
                 return False
             self.logger.info(f"取得完了: {len(candidates)}件のエントリー候補")
 
-            # 2. 候補にスコアを付け、上位候補を選択
+            # 3. 候補にスコアを付け、上位候補を選択
             self.logger.info("候補のスコアリングを実行")
             scored_candidates = self._score_candidates(candidates)
             
@@ -509,7 +519,8 @@ class StockPurchaseManager:
                         backtest_results=backtest_results,
                         technical_data=historical_data,
                         entry_score=entry_score,
-                        api_response_data=candidate  # candidatesに含まれる新しい項目を直接使用
+                        available_funds=available_funds,  # 買付余力を渡す
+                        api_response_data=candidate
                     )
                 
                 # プロンプト生成前の最新技術指標データを確認
@@ -562,6 +573,19 @@ class StockPurchaseManager:
                 # エントリー情報の共通設定
                 from datetime import datetime
                 candidate['entry_date'] = datetime.now().strftime('%Y-%m-%d')
+                
+                # AIの判断結果から保有期間を設定
+                rule = judgment.get('rule', {})
+                holding_period = rule.get('period')
+                if holding_period and holding_period != 'NG':
+                    try:
+                        candidate['holding_period'] = int(holding_period)
+                    except (ValueError, TypeError):
+                        candidate['holding_period'] = 5  # 変換エラー時はデフォルト値
+                else:
+                    candidate['holding_period'] = 5  # AIが判断できない場合のデフォルト値
+                
+                self.logger.info(f"保有期間を設定: {candidate['holding_period']}日")
 
                 # 5. 推奨された候補についてエントリーを実行
                 if self.test_mode:
