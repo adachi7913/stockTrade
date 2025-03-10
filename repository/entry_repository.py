@@ -3,8 +3,12 @@ import json
 from typing import List, Dict, Optional, Any
 from datetime import datetime, date
 from .base_repository import BaseRepository
+import logging
 
 class EntryRepository(BaseRepository):
+    def __init__(self, logger=None):
+        super().__init__(logger)
+        
     def fetch_best_entry_candidates(self, min_score: int = 700, limit: int = 400) -> List[Dict]:
         """
         エントリースコアが指定値以上のデータを一日辺りの期待リターンの降順で取得します
@@ -101,15 +105,19 @@ class EntryRepository(BaseRepository):
                 code, entry_date, entry_price, stop_loss,
                 target_price, reason, holding_period,
                 risk_reward, quantity, status,
-                created_at, updated_at
+                is_test, created_at, updated_at
             ) VALUES (
                 %(code)s, %(entry_date)s, %(entry_price)s, %(stop_loss)s,
                 %(target_price)s, %(reason)s, %(holding_period)s,
                 %(risk_reward)s, %(quantity)s, %(status)s,
-                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                %(is_test)s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             );
             """
             
+            # is_testのデフォルト値を設定
+            if 'is_test' not in entry_data:
+                entry_data['is_test'] = False
+                
             self.cur.execute(query, entry_data)
             self.conn.commit()
             return True
@@ -117,7 +125,7 @@ class EntryRepository(BaseRepository):
         except Exception as e:
             self.logger.error(f"エントリー情報保存エラー: {e}")
             self.conn.rollback()
-            return False 
+            return False
 
     def save_ai_judgment(self, judgment_data: Dict, stock_data: Dict, processing_info: Dict = None) -> Optional[int]:
         """
@@ -448,15 +456,19 @@ class EntryRepository(BaseRepository):
             self.logger.error(f"判断データの一括保存中にエラー: {e}")
             return False
 
-    def get_active_entries(self) -> List[Dict]:
+    def get_active_entries(self, test_mode: bool = False) -> List[Dict]:
         """
         アクティブな（保有中の）エントリー情報を取得します
+        
+        Args:
+            test_mode (bool): テストモードの場合True。テストモードの場合はテストデータのみ、
+                            本番モードの場合は本番データのみを取得します。
+                            デフォルトはFalse（本番モード）
         
         Returns:
             List[Dict]: アクティブなエントリー情報のリスト
         """
         try:
-            # テーブルエイリアス「e」を使わず、実際のテーブル構造に合わせたクエリに修正
             query = """
             SELECT 
                 code, entry_date, entry_price, stop_loss, target_price, 
@@ -466,11 +478,12 @@ class EntryRepository(BaseRepository):
                 entries
             WHERE 
                 status = 'active'
+                AND is_test = %s
             ORDER BY 
                 entry_date DESC;
             """
             
-            self.cur.execute(query)
+            self.cur.execute(query, (test_mode,))
             rows = self.cur.fetchall()
             
             if not rows:
@@ -555,3 +568,32 @@ class EntryRepository(BaseRepository):
             self.logger.error(f"売却情報更新中にエラー: {e}")
             self.conn.rollback()
             return False 
+
+    def get_available_funds(self) -> float:
+        """
+        現在の買付余力（利用可能資金）を取得
+        
+        Returns:
+            float: 利用可能な現金（円）。取得できない場合は0
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT available_funds 
+                        FROM trade_results 
+                        ORDER BY created_at DESC 
+                        LIMIT 1
+                    """)
+                    result = cur.fetchone()
+                    available_funds = float(result[0]) if result and result[0] is not None else 0
+                    
+                    if self.logger:
+                        self.logger.debug(f"買付余力: {available_funds:,}円")
+                        
+                    return available_funds
+                    
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"買付余力の取得に失敗: {e}")
+            return 0.0 
