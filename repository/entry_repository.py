@@ -6,8 +6,8 @@ from .base_repository import BaseRepository
 import logging
 
 class EntryRepository(BaseRepository):
-    def __init__(self, logger=None):
-        super().__init__(logger)
+    def __init__(self):
+        super().__init__()
         
     def fetch_best_entry_candidates(self, min_score: int = 700, limit: int = 400) -> List[Dict]:
         """
@@ -569,9 +569,14 @@ class EntryRepository(BaseRepository):
             self.conn.rollback()
             return False 
 
-    def get_available_funds(self) -> float:
+    def get_available_funds(self, test_mode: bool = False) -> float:
         """
         現在の買付余力（利用可能資金）を取得
+        
+        Args:
+            test_mode (bool): テストモードの場合True。テストモードの場合はテストデータのみ、
+                            本番モードの場合は本番データのみを取得します。
+                            デフォルトはFalse（本番モード）
         
         Returns:
             float: 利用可能な現金（円）。取得できない場合は0
@@ -582,9 +587,10 @@ class EntryRepository(BaseRepository):
                     cur.execute("""
                         SELECT available_funds 
                         FROM trade_results 
+                        WHERE is_test = %s
                         ORDER BY created_at DESC 
                         LIMIT 1
-                    """)
+                    """, (test_mode,))
                     result = cur.fetchone()
                     available_funds = float(result[0]) if result and result[0] is not None else 0
                     
@@ -597,3 +603,190 @@ class EntryRepository(BaseRepository):
             if self.logger:
                 self.logger.error(f"買付余力の取得に失敗: {e}")
             return 0.0 
+
+    def get_test_trade_history(self) -> List[Dict]:
+        """
+        テストモードでの取引履歴を取得します
+        
+        Returns:
+            List[Dict]: 取引履歴のリスト。各要素は以下のキーを含む辞書:
+                - trade_id: int (取引ID)
+                - created_at: datetime (取引日時)
+                - trade_type: str (取引種別: 'buy' or 'sell')
+                - symbol_code: str (銘柄コード)
+                - entry_price: float (取引価格)
+                - quantity: int (取引数量)
+                - profit_loss: float (損益 - 売却時のみ)
+                - available_funds: float (取引後の利用可能資金)
+        """
+        try:
+            query = """
+            SELECT 
+                tr.trade_id,
+                tr.created_at,
+                CASE 
+                    WHEN e.status = 'active' THEN 'buy'
+                    WHEN e.status = 'sold' THEN 'sell'
+                END as trade_type,
+                e.code as symbol_code,
+                CASE 
+                    WHEN e.status = 'active' THEN e.entry_price
+                    WHEN e.status = 'sold' THEN e.exit_price
+                END as entry_price,
+                e.quantity,
+                e.profit as profit_loss,
+                tr.available_funds
+            FROM 
+                trade_results tr
+                JOIN entries e ON tr.trade_id = e.trade_id
+            WHERE 
+                tr.is_test = true
+            ORDER BY 
+                tr.created_at DESC;
+            """
+            
+            self.cur.execute(query)
+            rows = self.cur.fetchall()
+            
+            history = []
+            for row in rows:
+                history.append({
+                    'trade_id': row[0],
+                    'created_at': row[1],
+                    'trade_type': row[2],
+                    'symbol_code': row[3],
+                    'entry_price': float(row[4]) if row[4] is not None else 0.0,
+                    'quantity': int(row[5]) if row[5] is not None else 0,
+                    'profit_loss': float(row[6]) if row[6] is not None else 0.0,
+                    'available_funds': float(row[7]) if row[7] is not None else 0.0
+                })
+            
+            return history
+            
+        except Exception as e:
+            self.logger.error(f"テスト取引履歴の取得に失敗: {e}")
+            return [] 
+
+    def get_test_summary(self) -> Dict:
+        """
+        テスト実行結果のサマリーを取得します
+        
+        Returns:
+            Dict: テスト結果のサマリー情報を含む辞書:
+                - initial_funds: float (初期資金)
+                - current_funds: float (現在の資金)
+                - total_profit: float (総損益)
+                - trade_count: int (取引回数)
+                - win_count: int (勝ち取引数)
+                - test_start: datetime (テスト開始日時)
+                - test_end: datetime (最終取引日時)
+        """
+        try:
+            query = """
+            WITH test_data AS (
+                SELECT 
+                    MIN(tr.created_at) as test_start,
+                    MAX(tr.created_at) as test_end,
+                    MIN(tr.available_funds) as initial_funds,
+                    MAX(CASE WHEN tr.created_at = (SELECT MAX(created_at) FROM trade_results WHERE is_test = true)
+                        THEN tr.available_funds END) as current_funds,
+                    COUNT(DISTINCT e.trade_id) as trade_count,
+                    COUNT(DISTINCT CASE WHEN e.profit > 0 THEN e.trade_id END) as win_count,
+                    SUM(e.profit) as total_profit
+                FROM 
+                    trade_results tr
+                    LEFT JOIN entries e ON tr.trade_id = e.trade_id
+                WHERE 
+                    tr.is_test = true
+            )
+            SELECT 
+                COALESCE(initial_funds, 0) as initial_funds,
+                COALESCE(current_funds, 0) as current_funds,
+                COALESCE(total_profit, 0) as total_profit,
+                COALESCE(trade_count, 0) as trade_count,
+                COALESCE(win_count, 0) as win_count,
+                test_start,
+                test_end
+            FROM 
+                test_data;
+            """
+            
+            self.cur.execute(query)
+            row = self.cur.fetchone()
+            
+            if not row:
+                return {
+                    'initial_funds': 0.0,
+                    'current_funds': 0.0,
+                    'total_profit': 0.0,
+                    'trade_count': 0,
+                    'win_count': 0,
+                    'test_start': None,
+                    'test_end': None
+                }
+            
+            return {
+                'initial_funds': float(row[0]) if row[0] is not None else 0.0,
+                'current_funds': float(row[1]) if row[1] is not None else 0.0,
+                'total_profit': float(row[2]) if row[2] is not None else 0.0,
+                'trade_count': int(row[3]) if row[3] is not None else 0,
+                'win_count': int(row[4]) if row[4] is not None else 0,
+                'test_start': row[5],
+                'test_end': row[6]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"テストサマリーの取得に失敗: {e}")
+            return {
+                'initial_funds': 0.0,
+                'current_funds': 0.0,
+                'total_profit': 0.0,
+                'trade_count': 0,
+                'win_count': 0,
+                'test_start': None,
+                'test_end': None
+            } 
+
+    def reset_test_data(self, initial_funds: float = 1000000.0) -> bool:
+        """
+        テストデータをリセットし、初期資金を設定します
+        
+        Args:
+            initial_funds (float): 初期資金額（デフォルト: 1,000,000円）
+            
+        Returns:
+            bool: リセット成功でTrue
+        """
+        try:
+            # トランザクション開始
+            with self.conn:
+                # テストモードのエントリーを削除
+                self.cur.execute("""
+                    DELETE FROM entries 
+                    WHERE is_test = true;
+                """)
+                
+                # テストモードの取引結果を削除
+                self.cur.execute("""
+                    DELETE FROM trade_results 
+                    WHERE is_test = true;
+                """)
+                
+                # 初期資金を設定
+                self.cur.execute("""
+                    INSERT INTO trade_results (
+                        trade_id, created_at, available_funds, is_test
+                    ) VALUES (
+                        nextval('trade_results_trade_id_seq'),
+                        CURRENT_TIMESTAMP,
+                        %s,
+                        true
+                    );
+                """, (initial_funds,))
+                
+                self.logger.info(f"テストデータをリセットしました。初期資金: {initial_funds:,.0f}円")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"テストデータのリセットに失敗: {e}")
+            return False 

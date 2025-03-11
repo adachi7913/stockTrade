@@ -616,31 +616,83 @@ class StockPurchaseManager:
 
 # 同期実行用のエントリーポイント
 def main():
-    # コマンドラインオプションの解析
+    """
+    メイン処理
+    
+    コマンドライン引数:
+        --test: テストモードを有効にする
+        --show-history: テストモードの取引履歴を表示
+        --show-summary: テストモードのサマリーを表示
+        --reset-test: テストデータをリセット
+        --initial-funds: テストデータリセット時の初期資金（デフォルト: 1,000,000円）
+    """
     import argparse
-    parser = argparse.ArgumentParser(description='株式購入処理を実行')
-    parser.add_argument('--max-calls', type=int, default=50, help='一回の処理で最大何件のAI判断を行うか（デフォルト: 50）')
-    parser.add_argument('--min-score', type=float, default=70.0, help='エントリースコアの最低値（デフォルト: 70.0）')
-    parser.add_argument('--api-delay', type=int, default=30, help='AI API呼び出し間の待機時間（秒、デフォルト: 30）')
-    parser.add_argument('--test-mode', action='store_true', help='テストモードを有効にする（実際の購入処理をスキップ）')
+    
+    parser = argparse.ArgumentParser(description='株式購入処理を実行します')
+    parser.add_argument('--test', action='store_true', help='テストモードを有効にする')
+    parser.add_argument('--show-history', action='store_true', help='テストモードの取引履歴を表示')
+    parser.add_argument('--show-summary', action='store_true', help='テストモードのサマリーを表示')
+    parser.add_argument('--reset-test', action='store_true', help='テストデータをリセット')
+    parser.add_argument('--initial-funds', type=float, default=1000000.0, help='テストデータリセット時の初期資金')
+    
     args = parser.parse_args()
-
-    manager = StockPurchaseManager(
-        max_ai_calls=args.max_calls,
-        min_entry_score=args.min_score,
-        api_delay=args.api_delay,
-        test_mode=args.test_mode
-    )
     
-    # テストモードの設定（環境変数からの読み込みはコンストラクタ内で行われる）
-    if args.test_mode:
-        logger.info("コマンドライン引数によりテストモードが有効化されました")
+    # EntryRepositoryのインスタンス化
+    entry_repository = EntryRepository()
     
+    # テスト関連の機能を実行
+    if args.show_history:
+        history = entry_repository.get_test_trade_history()
+        if history:
+            print("\n=== テストモード取引履歴 ===")
+            for trade in history:
+                print(f"取引ID: {trade['trade_id']}")
+                print(f"日時: {trade['created_at']}")
+                print(f"種別: {trade['trade_type']}")
+                print(f"銘柄: {trade['symbol_code']}")
+                print(f"価格: {trade['entry_price']:,.0f}円")
+                print(f"数量: {trade['quantity']}株")
+                if trade['trade_type'] == 'sell':
+                    print(f"損益: {trade['profit_loss']:,.0f}円")
+                print(f"残高: {trade['available_funds']:,.0f}円")
+                print("---")
+        else:
+            print("テストモードの取引履歴がありません")
+        return
+        
+    if args.show_summary:
+        summary = entry_repository.get_test_summary()
+        if summary['test_start']:
+            print("\n=== テストモードサマリー ===")
+            print(f"テスト期間: {summary['test_start']} ～ {summary['test_end']}")
+            print(f"初期資金: {summary['initial_funds']:,.0f}円")
+            print(f"現在資金: {summary['current_funds']:,.0f}円")
+            print(f"総損益: {summary['total_profit']:,.0f}円")
+            print(f"取引回数: {summary['trade_count']}回")
+            print(f"勝ち取引: {summary['win_count']}回")
+            if summary['trade_count'] > 0:
+                win_rate = (summary['win_count'] / summary['trade_count']) * 100
+                print(f"勝率: {win_rate:.1f}%")
+        else:
+            print("テストモードのサマリー情報がありません")
+        return
+        
+    if args.reset_test:
+        if entry_repository.reset_test_data(args.initial_funds):
+            print(f"テストデータをリセットしました。初期資金: {args.initial_funds:,.0f}円")
+        else:
+            print("テストデータのリセットに失敗しました")
+        return
+    
+    # 通常の購入処理を実行
+    manager = StockPurchaseManager(test_mode=args.test)
     success = manager.execute_purchase()
+    
     if success:
-        logger.info("株式購入処理が完了しました")
+        print("購入処理が完了しました")
     else:
-        logger.info("株式購入処理は実行されませんでした")
+        print("購入処理が失敗しました")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 

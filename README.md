@@ -11,7 +11,8 @@ stockTrade/
 │   │   ├── auto_sell_stock.py       # 自動売却機能
 │   │   └── purchase_stock.py        # 自動購入機能
 │   ├── test/            # テスト実行系
-│   │   └── test_tachibana_api.py    # 立花証券APIのテスト
+│   │   ├── test_tachibana_api.py    # 立花証券APIのテスト
+│   │   └── test_entry_repository.py # EntryRepositoryのテスト
 │   └── tools/           # その他のツール系
 │
 ├── batch/            # バッチファイル（.bat）を格納
@@ -71,13 +72,26 @@ batch/daily/purchase_stock.bat
 
 # テスト実行（購入をシミュレーション）
 batch/test/purchase_stock_test.bat
+
+# テストモードの取引履歴表示
+python bin/daily/purchase_stock.py --show-history
+
+# テストモードのサマリー表示
+python bin/daily/purchase_stock.py --show-summary
+
+# テストデータのリセット（初期資金200万円）
+python bin/daily/purchase_stock.py --reset-test --initial-funds 2000000
 ```
 
 #### コマンドライン引数
 - `--max-calls <数値>`: AI判断の最大件数（デフォルト: 50件）
 - `--min-score <数値>`: エントリースコアの最低値（デフォルト: 70.0）
 - `--api-delay <秒数>`: API呼び出し間の待機時間（デフォルト: 30秒）
-- `--test-mode`: テストモードの有効化（実際の購入処理をスキップ）
+- `--test`: テストモードの有効化（実際の購入処理をスキップ）
+- `--show-history`: テストモードの取引履歴を表示
+- `--show-summary`: テストモードのサマリーを表示
+- `--reset-test`: テストデータをリセット
+- `--initial-funds <数値>`: テストデータリセット時の初期資金（デフォルト: 1,000,000円）
 
 #### 環境変数による制御
 1. **必須の環境変数**
@@ -182,4 +196,38 @@ batch/test/auto_sell_stock_simulation_test.bat
 ### データベース
 - 株価データは日次で更新されます
 - データベースのバックアップは自動的に実行されます
-- エラー発生時はデータベースの整合性を確認してください 
+- エラー発生時はデータベースの整合性を確認してください
+
+## EntryRepositoryについて
+
+### 概要
+EntryRepositoryは、資金管理と取引履歴管理を行うためのリポジトリクラスです。以下の機能を提供します：
+
+### 主な機能
+1. **資金管理**
+   - `get_available_funds(test_mode=False)`: 利用可能な資金を取得
+   - `reset_test_data(initial_funds=1000000.0)`: テストデータをリセット
+
+2. **取引履歴管理**
+   - `get_test_trade_history()`: テストモードの取引履歴を取得
+   - `get_test_summary()`: テストモードのサマリー情報を取得
+
+3. **エントリー管理**
+   - `save_entry_info(entry_data)`: エントリー情報を保存
+   - `get_active_entries(test_mode=False)`: アクティブなエントリーを取得
+   - `update_exit_info(...)`: 売却情報を更新
+
+### テストの実行方法
+```bash
+# EntryRepositoryのテストを実行
+python bin/test/test_entry_repository.py
+
+# 特定のテストメソッドのみ実行
+python -m unittest bin.test.test_entry_repository.TestEntryRepository.test_get_available_funds
+```
+
+### テストケース
+1. `test_get_available_funds`: 資金取得機能のテスト
+2. `test_get_test_trade_history`: 取引履歴取得機能のテスト
+3. `test_get_test_summary`: サマリー情報取得機能のテスト
+4. `test_reset_test_data`: データリセット機能のテスト 
