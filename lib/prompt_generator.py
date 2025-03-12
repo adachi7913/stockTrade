@@ -45,14 +45,6 @@ class PromptGenerator:
         Returns:
             str: 生成されたプロンプト
         """
-        # 最新のADX値をログに出力
-        latest_data = technical_data[-1] if technical_data else {}
-        
-        # ADX値をログに出力（デバッグ用）
-        adx_value = latest_data.get('adx')
-        self.logger.debug(f"最新のADX値: {adx_value}")
-        print(f"DEBUG - プロンプトに含まれるADX値: {adx_value}")
-        
         # 基本的な銘柄情報
         stock_code = stock_data.get('code', 'unknown')
         company_name = stock_data.get('company_name', 'unknown')
@@ -70,111 +62,37 @@ class PromptGenerator:
 - 企業名: {company_name}
 - 現在価格: {current_price:,}円
 - 事前スコア: {entry_score:.1f}/100
-
-## 買付余力情報
 - 利用可能資金: {available_funds:,}円
 - 購入可能最大株数: {max_possible_lots * 100:,}株（100株単位）
 
-注意事項:
-- 購入株数は100株単位で指定（最小:100株）
-- 株価 × 購入株数が利用可能資金を超えないこと
+## 直近の技術指標
 """
-
-        # api_responseテーブルからのデータがあれば追加
-        if api_response_data:
-            # ルール情報
-            rule = api_response_data.get('rule', {})
-            entry_price = rule.get('entryPrice', 'NG')
-            stop_loss = rule.get('stop_loss', 'NG')
-            target_price = rule.get('target_price', 'NG')
-            period = rule.get('period', 'NG')
-            risk_reward = rule.get('risk_reward', 'NG')
-            
-            # 前回の判断を追加
-            prompt += f"""
-## 前回の判断情報
-- エントリースコア: {api_response_data.get('entry_score', 'なし')}
-- 判断理由: {api_response_data.get('reason', 'なし')}
-- エントリー価格: {entry_price}
-- ストップロス: {stop_loss}
-- 利確目標: {target_price}
-- 推奨保有期間: {period}日
-- リスクリワード比: {risk_reward}
-
-### エントリー条件
-{api_response_data.get('entry_conditions', 'なし')}
-
-### 決済条件
-{api_response_data.get('exit_conditions', 'なし')}
-
-### 市場分析
-- 短期トレンド: {api_response_data.get('market_analysis', {}).get('short_term_trend', 'なし')}
-- 中期トレンド: {api_response_data.get('market_analysis', {}).get('mid_term_trend', 'なし')}
-- 長期トレンド: {api_response_data.get('market_analysis', {}).get('long_term_trend', 'なし')}
-- サポート/レジスタンス: {api_response_data.get('market_analysis', {}).get('support_resistance', 'なし')}
-
-### テクニカルパターン
-{api_response_data.get('technical_patterns', 'なし')}
-
-### 指標分析
-{api_response_data.get('indicator_analysis', 'なし')}
-
-### 再判断までの日数
-{api_response_data.get('no_entry_span', 'なし')}日
-"""
-
-        # 直近3日分の重要な指標を抽出（少ないデータ量で効果的な情報を提供）
-        recent_data = technical_data[-5:] if len(technical_data) >= 5 else technical_data
-        
-        # 技術指標の説明
-        prompt += f"""
-## 技術指標の説明
-- **RSI (相対力指数)**: 0〜100の値。70以上は買われすぎ、30以下は売られすぎを示す。
-- **ストキャスティクス %K**: 0〜100の値。80以上は買われすぎ、20以下は売られすぎを示す。
-- **ADX (平均方向性指数)**: トレンドの強さを示す。25以上で強いトレンド、15以下で弱いトレンドを示す。
-- **MACD**: 短期と長期の移動平均線の差。上向きならば上昇トレンド、下向きならば下降トレンドを示す。
-- **ボリンジャーバンド**: 上下2σ（標準偏差）のバンドと中央移動平均線。価格がバンド外に出ると反転の可能性。
-- **一目均衡表**: 日本発の複合指標。転換線・基準線のクロスや雲（先行スパンA/B間）の位置関係でトレンドを判断。
-- **ATR (平均真価格範囲)**: ボラティリティの指標。高値は大きな値動き、低値は小さな値動きを示す。
-"""
-
-        # 直近5日分の詳細データを表示
+        # 直近3日分の重要な指標を抽出
+        recent_data = technical_data[-3:] if len(technical_data) >= 3 else technical_data
         for idx, day_data in enumerate(reversed(recent_data)):
             day_num = idx + 1
             date = day_data.get('date', '不明')
             prompt += f"""
-### {day_num}日前 ({date})
-- **価格**: 始値={day_data.get('open', 0):.1f}円, 高値={day_data.get('high', 0):.1f}円, 安値={day_data.get('low', 0):.1f}円, 終値={day_data.get('close', 0):.1f}円
-- **RSI**: {day_data.get('rsi', 0):.1f}
-- **ストキャスティクス**: %K={day_data.get('stoch_k', 0):.1f}, %D={day_data.get('stoch_d', 0):.1f}
-- **ADX**: {day_data.get('adx', 0):.1f}
-- **MACD**: {day_data.get('macd', 0):.2f}
-- **ボリンジャーバンド**: 下={day_data.get('bb_lower', 0):.1f}, 中={day_data.get('bb_middle', 0):.1f}, 上={day_data.get('bb_upper', 0):.1f}
-- **一目均衡表**: 転換線={day_data.get('ichimoku_tenkan', 0):.1f}, 基準線={day_data.get('ichimoku_kijun', 0):.1f}, 先行スパンA={day_data.get('ichimoku_senkou_a', 0):.1f}, 先行スパンB={day_data.get('ichimoku_senkou_b', 0):.1f}
-- **ATR**: {day_data.get('atr', 0):.2f}
+{day_num}日前 ({date})
+- 価格: 終値={day_data.get('close', 0):.1f}円
+- RSI: {day_data.get('rsi', 0):.1f}
+- ストキャスティクス %K: {day_data.get('stoch_k', 0):.1f}
+- ADX: {day_data.get('adx', 0):.1f}
+- MACD: {day_data.get('macd', 0):.2f}
 """
 
         # バックテスト結果のサマリー
         prompt += f"""
-## バックテスト結果サマリー
+## バックテスト結果
 - 勝率: {backtest_results.get('success_rate', 0):.1f}%
 - 平均リターン: {backtest_results.get('average_return', 0):.2f}
 - 取引回数: {backtest_results.get('total_trades', 0)}回
 """
 
-        # 最も成功した戦略があれば追加
-        if backtest_results.get('best_strategy'):
-            prompt += f"- 最適戦略: {backtest_results.get('best_strategy', 'なし')}\n"
-
         # 判断指示を追加
         prompt += f"""
 ## 判断指示
 この銘柄へのエントリー（購入）が推奨されるかどうかを判断してください。
-考慮すべき点:
-1. 上記の指標は買い時を示しているか
-2. バックテスト結果は良好か
-3. 現在のリスク/リターン比は良好か
-4. 現在の資金に応じた、適切な購入株数（最小:100株、以降100株単位の整数）
 
 以下の形式で回答してください:
 ```json
@@ -183,34 +101,17 @@ class PromptGenerator:
   "confidence": 0-100,
   "reasoning": "判断理由を簡潔に説明",
   "concerns": "潜在的な懸念事項があれば記載",
-  "entry_score": <0〜1000の整数>,
-  "reason": "エントリー判断の理由及び各段階での点数根拠",
   "rule": {{
     "entryPrice": "エントリー価格（金額のみ）" or "NG",
     "stop_loss": "ストップロス価格（金額のみ）" or "NG",
     "target_price": "利確目標（金額のみ）" or "NG",
     "period": "推奨保有期間（整数:1 - 14）" or "NG",
     "risk_reward": "リスクリワード比（計算結果）" or "NG",
-    "quantity": "推奨購入株数（整数）" or "NG"
-  }},
-  "entry_conditions": "具体的なエントリートリガー条件を箇条書きで記述",
-  "exit_conditions": "具体的な決済条件を箇条書きで記述",
-  "market_analysis": {{
-    "short_term_trend": "短期トレンドの方向と強さ",
-    "mid_term_trend": "中期トレンドの方向と強さ",
-    "long_term_trend": "長期トレンドの方向と強さ",
-    "support_resistance": "主要なサポート/レジスタンスレベル" 
-  }},
-  "technical_patterns": "検出されたチャートパターンと価格形成の特徴",
-  "indicator_analysis": "複数指標の総合分析結果",
-  "no_entry_span": <再判断までの日数（整数:1 - 14）>
+    "quantity": "推奨購入株数（最小:100株、以降100株単位の整数）" or "NG"
+  }}
 }}
 ```
 """
-
-        if self.verbose:
-            self.logger.debug(f"生成されたプロンプト（長さ: {len(prompt)}文字）:\n{prompt}")
-        
         return prompt
     
     def generate_simplified_prompt(self, stock_data: Dict[str, Any], entry_score: float) -> str:

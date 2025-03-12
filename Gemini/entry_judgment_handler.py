@@ -52,7 +52,7 @@ class EntryJudgmentHandler:
                 self.logger.addHandler(handler)
         
         # モデル設定
-        model_name = os.getenv('GEMINI_PRO_MODEL', 'gemini-pro')
+        model_name = os.getenv('GEMINI_PURCHASE_MODEL', 'gemini-pro')
         self.model = genai.GenerativeModel(model_name)
         self.logger.info(f"EntryJudgmentHandler initialized with model: {model_name}")
 
@@ -223,6 +223,7 @@ class EntryJudgmentHandler:
             
             # カスタムプロンプトを使用
             response = self._query_gemini(custom_prompt)
+            print(f"response: {response}")
             
             # レスポンスの解析
             judgment = self._parse_judgment(response.text)

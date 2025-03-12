@@ -106,10 +106,18 @@ class StockPurchaseManager:
                 - target_price: 目標価格
                 など
         """
+        # 環境変数を再読み込み
+        load_dotenv(override=True)
+        
         candidates = self.entry_repository.fetch_best_entry_candidates()
         if not candidates:
             self.logger.info("エントリー候補が見つかりませんでした")
             return []
+            
+        # 環境変数の値をログ出力
+        env_limit = os.getenv("ENTRY_CANDIDATE_LIMIT")
+        self.logger.info(f"現在のENTRY_CANDIDATE_LIMIT: {env_limit}")
+        
         return candidates
 
     def _get_historical_data(self, stock_code: int) -> List[Dict]:
@@ -463,7 +471,7 @@ class StockPurchaseManager:
         try:
             # 1. 買付余力を取得
             self.logger.info("買付余力の確認")
-            available_funds = self.entry_repository.get_available_funds()
+            available_funds = self.entry_repository.get_available_funds(test_mode=self.test_mode)
             
             if available_funds <= 0:
                 self.logger.warning("買付余力がありません")
@@ -573,6 +581,8 @@ class StockPurchaseManager:
                 # エントリー情報の共通設定
                 from datetime import datetime
                 candidate['entry_date'] = datetime.now().strftime('%Y-%m-%d')
+                candidate['status'] = 'active'  # 新規エントリーは'active'ステータス
+                candidate['reason'] = judgment.get('reasoning', '理由なし')  # AIの判断理由を設定
                 
                 # AIの判断結果から保有期間を設定
                 rule = judgment.get('rule', {})
@@ -586,6 +596,65 @@ class StockPurchaseManager:
                     candidate['holding_period'] = 5  # AIが判断できない場合のデフォルト値
                 
                 self.logger.info(f"保有期間を設定: {candidate['holding_period']}日")
+
+                # AIの判断結果から価格情報を設定
+                entry_price = rule.get('entryPrice')
+                stop_loss = rule.get('stop_loss')
+                target_price = rule.get('target_price')
+                risk_reward = rule.get('risk_reward')
+
+                # 価格情報の検証と設定
+                if entry_price and entry_price != 'NG':
+                    try:
+                        candidate['entry_price'] = float(entry_price)
+                    except (ValueError, TypeError):
+                        self.logger.error(f"エントリー価格の変換に失敗: {entry_price}")
+                        continue
+                else:
+                    self.logger.error("エントリー価格が指定されていません")
+                    continue
+
+                if stop_loss and stop_loss != 'NG':
+                    try:
+                        candidate['stop_loss'] = float(stop_loss)
+                    except (ValueError, TypeError):
+                        self.logger.error(f"損切り価格の変換に失敗: {stop_loss}")
+                        continue
+                else:
+                    self.logger.error("損切り価格が指定されていません")
+                    continue
+
+                if target_price and target_price != 'NG':
+                    try:
+                        candidate['target_price'] = float(target_price)
+                    except (ValueError, TypeError):
+                        self.logger.error(f"目標価格の変換に失敗: {target_price}")
+                        continue
+                else:
+                    self.logger.error("目標価格が指定されていません")
+                    continue
+
+                if risk_reward and risk_reward != 'NG':
+                    try:
+                        candidate['risk_reward'] = float(risk_reward)
+                    except (ValueError, TypeError):
+                        self.logger.error(f"リスクリワード比の変換に失敗: {risk_reward}")
+                        continue
+                else:
+                    self.logger.error("リスクリワード比が指定されていません")
+                    continue
+
+                # AIの判断結果から購入株数を設定
+                quantity = rule.get('quantity')
+                if quantity and quantity != 'NG':
+                    try:
+                        candidate['quantity'] = int(quantity)
+                    except (ValueError, TypeError):
+                        self.logger.error(f"購入株数の変換に失敗: {quantity}")
+                        continue
+                else:
+                    self.logger.error("購入株数が指定されていません")
+                    continue
 
                 # 5. 推奨された候補についてエントリーを実行
                 if self.test_mode:
@@ -625,6 +694,9 @@ def main():
         --show-summary: テストモードのサマリーを表示
         --reset-test: テストデータをリセット
         --initial-funds: テストデータリセット時の初期資金（デフォルト: 1,000,000円）
+        --max-calls: AI判断の最大件数（デフォルト: 50件）
+        --min-score: エントリースコアの最低値（デフォルト: 70.0）
+        --api-delay: API呼び出し間の待機時間（デフォルト: 30秒）
     """
     import argparse
     
@@ -634,6 +706,9 @@ def main():
     parser.add_argument('--show-summary', action='store_true', help='テストモードのサマリーを表示')
     parser.add_argument('--reset-test', action='store_true', help='テストデータをリセット')
     parser.add_argument('--initial-funds', type=float, default=1000000.0, help='テストデータリセット時の初期資金')
+    parser.add_argument('--max-calls', type=int, default=50, help='AI判断の最大件数')
+    parser.add_argument('--min-score', type=float, default=70.0, help='エントリースコアの最低値')
+    parser.add_argument('--api-delay', type=int, default=30, help='API呼び出し間の待機時間（秒）')
     
     args = parser.parse_args()
     
@@ -685,7 +760,12 @@ def main():
         return
     
     # 通常の購入処理を実行
-    manager = StockPurchaseManager(test_mode=args.test)
+    manager = StockPurchaseManager(
+        test_mode=args.test,
+        max_ai_calls=args.max_calls,
+        min_entry_score=args.min_score,
+        api_delay=args.api_delay
+    )
     success = manager.execute_purchase()
     
     if success:
