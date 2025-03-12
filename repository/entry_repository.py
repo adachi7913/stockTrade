@@ -32,6 +32,7 @@ class EntryRepository(BaseRepository):
 
             # 環境変数 ENTRY_CANDIDATE_LIMIT が設定されている場合、その値を使用（int変換）
             env_limit = os.getenv("ENTRY_CANDIDATE_LIMIT")
+            self.logger.info(f"ENTRY_CANDIDATE_LIMIT: {env_limit}")
             if env_limit is not None:
                 try:
                     limit = int(env_limit)
@@ -749,43 +750,49 @@ class EntryRepository(BaseRepository):
 
     def reset_test_data(self, initial_funds: float = 1000000.0) -> bool:
         """
-        テストデータをリセットし、初期資金を設定します
+        テストデータをリセットし、初期資金を設定
         
         Args:
-            initial_funds (float): 初期資金額（デフォルト: 1,000,000円）
+            initial_funds (float): 初期資金（デフォルト: 1,000,000円）
             
         Returns:
             bool: リセット成功でTrue
         """
         try:
-            # トランザクション開始
-            with self.conn:
-                # テストモードのエントリーを削除
-                self.cur.execute("""
-                    DELETE FROM entries 
-                    WHERE is_test = true;
-                """)
-                
-                # テストモードの取引結果を削除
-                self.cur.execute("""
-                    DELETE FROM trade_results 
-                    WHERE is_test = true;
-                """)
-                
-                # 初期資金を設定
-                self.cur.execute("""
-                    INSERT INTO trade_results (
-                        trade_id, created_at, available_funds, is_test
-                    ) VALUES (
-                        nextval('trade_results_trade_id_seq'),
-                        CURRENT_TIMESTAMP,
-                        %s,
-                        true
-                    );
-                """, (initial_funds,))
-                
-                self.logger.info(f"テストデータをリセットしました。初期資金: {initial_funds:,.0f}円")
-                return True
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    # テストデータの削除
+                    cur.execute("""
+                        DELETE FROM entries WHERE is_test = true;
+                        DELETE FROM ai_entry_judgments WHERE is_test = true;
+                        DELETE FROM trade_results WHERE is_test = true;
+                    """)
+                    
+                    # 初期資金の設定
+                    cur.execute("""
+                        INSERT INTO trade_results (
+                            trade_type,
+                            symbol_code,
+                            entry_price,
+                            quantity,
+                            profit_loss,
+                            available_funds,
+                            is_test,
+                            position
+                        ) VALUES (
+                            'entry',  -- trade_typeはentryかcloseのみ許可
+                            '0000',   -- symbol_codeは必須
+                            0,        -- entry_priceは任意
+                            0,        -- quantityは必須
+                            0,        -- profit_lossは必須
+                            %s,       -- available_fundsは必須
+                            true,     -- is_testはテストデータ
+                            'long'    -- positionはlongかshort
+                        )
+                    """, (initial_funds,))
+                    
+                    conn.commit()
+                    return True
                 
         except Exception as e:
             self.logger.error(f"テストデータのリセットに失敗: {e}")

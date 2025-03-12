@@ -83,6 +83,41 @@ python bin/daily/purchase_stock.py --show-summary
 python bin/daily/purchase_stock.py --reset-test --initial-funds 2000000
 ```
 
+### 自動購入機能のコマンドライン引数
+
+#### 実行モード関連
+- `--test`: テストモードを有効化。実際の購入処理をスキップし、シミュレーションのみ実行
+- `--debug`: デバッグモードを有効化。詳細なログを出力
+
+#### テストデータ管理
+- `--show-history`: テストモードでの取引履歴を表示
+- `--show-summary`: テストモードでの取引サマリー（損益、勝率など）を表示
+- `--reset-test`: テストデータをリセット。既存のテストデータを全て削除
+- `--initial-funds <数値>`: テストデータリセット時の初期資金を指定（デフォルト: 1,000,000円）
+
+#### AI判断制御
+- `--max-calls <数値>`: AI判断を行う最大銘柄数を指定（デフォルト: 50件）
+- `--min-score <数値>`: エントリー候補とする最低スコアを指定（デフォルト: 70.0）
+- `--api-delay <秒数>`: AI API呼び出し間の待機時間を指定（デフォルト: 30秒）
+
+#### 使用例
+```bash
+# テストモードで実行（購入シミュレーション）
+python bin/daily/purchase_stock.py --test
+
+# テストモードで実行（AI判断10件、最低スコア80）
+python bin/daily/purchase_stock.py --test --max-calls 10 --min-score 80
+
+# テストデータをリセットして初期資金200万円で開始
+python bin/daily/purchase_stock.py --reset-test --initial-funds 2000000
+
+# テストモードの取引履歴を確認
+python bin/daily/purchase_stock.py --show-history
+
+# デバッグモードで本番実行
+python bin/daily/purchase_stock.py --debug
+```
+
 #### コマンドライン引数
 - `--max-calls <数値>`: AI判断の最大件数（デフォルト: 50件）
 - `--min-score <数値>`: エントリースコアの最低値（デフォルト: 70.0）
