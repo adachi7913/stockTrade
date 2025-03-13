@@ -266,3 +266,21 @@ python -m unittest bin.test.test_entry_repository.TestEntryRepository.test_get_a
 2. `test_get_test_trade_history`: 取引履歴取得機能のテスト
 3. `test_get_test_summary`: サマリー情報取得機能のテスト
 4. `test_reset_test_data`: データリセット機能のテスト 
+
+### auto_sell_stock.py の動作仕様
+
+1. **実行オプション**
+   - `--test`: テストモード（売却を実行しない）
+   - `--force-sell`: 強制売却モード（確認なしで売却）
+   - `--debug`: デバッグモード
+
+2. **評価プロセス**
+   - ブラウザ操作による保有証券情報の取得
+   - 各銘柄の過去データとインジケーター分析
+   - Gemini APIによるAI評価
+   - 確信度500以上のSELL判断を売却候補として抽出
+
+3. **売却判断基準**
+   - 損益率による判断（-5%以下で売却、+10%以上で利確）
+   - テクニカル指標（RSI、MACD）による判断
+   - AI評価による総合判断 
