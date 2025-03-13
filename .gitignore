@@ -6,6 +6,7 @@ __pycache__/
 output.html
 stooq.html
 .env
+.env.backup
 log/
 .specstory/history/
 pandas-ta/
