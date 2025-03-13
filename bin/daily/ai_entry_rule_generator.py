@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
+# プロジェクトルートディレクトリをPythonパスに追加
+import os
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 from service.ai_rule_service import run_ai_rule_generation
 import logging
-import os
 import datetime
 import glob
 import time
-import sys
 import signal
 from dotenv import load_dotenv, set_key
 from utils.date_util import is_holiday
@@ -27,7 +32,7 @@ def signal_handler(sig, frame):
     
     stop_processing = True
     # .envファイルに停止フラグを設定
-    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    dotenv_path = os.path.join(project_root, '.env')
     set_key(dotenv_path, "STOP_GEMINI_FLAG", "y")
     
     if logger:
@@ -46,7 +51,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     
     # 停止フラグをリセット
-    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    dotenv_path = os.path.join(project_root, '.env')
     set_key(dotenv_path, "STOP_GEMINI_FLAG", "false")
     
     logger.info("AIエントリールール生成処理を開始します")
