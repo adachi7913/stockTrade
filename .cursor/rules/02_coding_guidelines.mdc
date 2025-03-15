@@ -1,7 +1,7 @@
 ---
-description: 技術スタック・コーディング規約
+description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 # コーディングガイドライン
 
