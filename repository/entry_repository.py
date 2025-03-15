@@ -513,22 +513,9 @@ class EntryRepository(BaseRepository):
             self.logger.error(f"アクティブなエントリー取得中にエラー: {e}")
             return []
 
-    def update_exit_info(self, code: str, entry_date: date, exit_price: float, exit_date: date, 
-                        profit: float, profit_rate: float, exit_reason: str) -> bool:
+    def update_exit_info(self, code: str, entry_date: date, exit_data: Dict, is_test: bool = False) -> bool:
         """
-        エントリーの売却情報を更新します
-        
-        Args:
-            code (str): 銘柄コード
-            entry_date (date): エントリー日
-            exit_price (float): 売却価格
-            exit_date (date): 売却日
-            profit (float): 利益額
-            profit_rate (float): 利益率（%）
-            exit_reason (str): 売却理由
-            
-        Returns:
-            bool: 更新成功でTrue
+        is_testパラメータの追加
         """
         try:
             query = """
@@ -546,11 +533,11 @@ class EntryRepository(BaseRepository):
             """
             
             self.cur.execute(query, (
-                exit_date,
-                exit_price,
-                profit,
-                profit_rate,
-                exit_reason,
+                exit_data['exit_date'],
+                exit_data['exit_price'],
+                exit_data['profit'],
+                exit_data['profit_rate'],
+                exit_data['exit_reason'],
                 code,
                 entry_date
             ))
@@ -796,4 +783,40 @@ class EntryRepository(BaseRepository):
                 
         except Exception as e:
             self.logger.error(f"テストデータのリセットに失敗: {e}")
+            return False 
+
+    def save_test_trade_result(self, trade_data: Dict) -> bool:
+        """
+        テストモードでのトレード結果保存
+        """
+        try:
+            query = """
+            INSERT INTO trade_results (
+                trade_type,
+                symbol_code,
+                entry_price,
+                quantity,
+                profit_loss,
+                available_funds,
+                is_test,
+                position
+            ) VALUES (
+                %(trade_type)s,
+                %(symbol_code)s,
+                %(entry_price)s,
+                %(quantity)s,
+                %(profit_loss)s,
+                %(available_funds)s,
+                %(is_test)s,
+                %(position)s
+            );
+            """
+            
+            self.cur.execute(query, trade_data)
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"テストトレード結果保存エラー: {e}")
+            self.conn.rollback()
             return False 
