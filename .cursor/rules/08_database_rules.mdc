@@ -1,5 +1,5 @@
 ---
-description: 
+description: データベースのカラム設定
 globs: 
 alwaysApply: false
 ---
@@ -34,6 +34,7 @@ AIによる株式エントリー判断の結果を格納するテーブル
 | total_tokens | integer | YES | - | 合計トークン数 |
 | processing_time | numeric(10,2) | YES | - | 処理時間 |
 | model_version | varchar(100) | YES | - | 使用モデルバージョン |
+| is_test | boolean | NO | false | テストモードでの実行フラグ |
 
 #### 制約
 
@@ -95,7 +96,6 @@ API応答結果のバックアップテーブル
 | score | integer | YES | - | スコア |
 | no_entry_span | integer | YES | - | エントリー禁止期間 |
 | update_when | timestamp | YES | - | 更新日時 |
-| is_test | boolean | NO | false | テストモードでの実行フラグ |
 
 ### backtest_results テーブル
 
