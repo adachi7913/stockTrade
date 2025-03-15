@@ -171,10 +171,7 @@ class AutoSellStock:
 
     def get_holdings(self) -> Optional[Dict[str, str]]:
         """
-        証券口座から保有証券の情報を取得
-        
-        Returns:
-            Dict[str, str]: {証券コード: 現在価格} の形式、取得失敗時はNone
+        entriesテーブルからアクティブな銘柄を取得するように変更
         """
         self.logger.info("保有証券情報の取得を開始")
         prompt = self.browser_use._get_prompt()
@@ -283,6 +280,22 @@ class AutoSellStock:
         except Exception as e:
             self.logger.error(f"評価処理中にエラーが発生: {e}")
             return None
+
+    def save_evaluation_result(self, code: str, evaluation: EvaluationResult) -> bool:
+        """
+        評価結果をtrade_resultsテーブルに保存
+        """
+        # 実装が必要
+        return False
+
+    def execute_sell(self, code: str, evaluation: EvaluationResult) -> bool:
+        """
+        テストモード時の売却処理
+        - trade_resultsテーブルに売却記録を追加（is_test=True）
+        - entriesテーブルのステータスを更新（status='sold'）
+        """
+        # 実装が必要
+        return False
 
 def main():
     """メイン処理"""

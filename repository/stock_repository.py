@@ -60,6 +60,7 @@ class StockRepository(BaseRepository):
             select_query = """
             SELECT code FROM companies
             WHERE market_name NOT IN ('その他')
+            AND code NOT LIKE '%A%'
             ORDER BY code;
             """
             self.cur.execute(select_query)
