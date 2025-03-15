@@ -1,5 +1,5 @@
 ---
-description: データベースのカラム設定
+description: 
 globs: 
 alwaysApply: false
 ---
@@ -95,6 +95,7 @@ API応答結果のバックアップテーブル
 | score | integer | YES | - | スコア |
 | no_entry_span | integer | YES | - | エントリー禁止期間 |
 | update_when | timestamp | YES | - | 更新日時 |
+| is_test | boolean | NO | false | テストモードでの実行フラグ |
 
 ### backtest_results テーブル
 
@@ -204,6 +205,7 @@ API応答結果のバックアップテーブル
 | exit_reason | text | YES | - | 売却理由 |
 | created_at | timestamp | NO | CURRENT_TIMESTAMP | 作成日時 |
 | updated_at | timestamp | NO | CURRENT_TIMESTAMP | 更新日時 |
+| is_test | boolean | NO | false | テストモードでの実行フラグ |
 
 #### 制約
 
@@ -254,6 +256,7 @@ API応答結果のバックアップテーブル
 | position | varchar(10) | YES | - | ポジション(long/short) |
 | strategy_id | integer | YES | - | 戦略ID |
 | note | text | YES | - | メモ |
+| is_test | boolean | NO | false | テストモードでの実行フラグ |
 
 #### 制約
 

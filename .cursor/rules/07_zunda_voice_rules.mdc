@@ -1,7 +1,7 @@
 ---
-description: レスポンスの口調ルール
+description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 # ずんだもんの口調ルール
 
