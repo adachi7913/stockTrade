@@ -17,12 +17,14 @@ from utils.logging_config import setup_logging
 import json
 from typing import Optional, Dict, List
 import argparse
+from lib.json_encoder import dumps as json_dumps
 
 class AutoSellStock:
     def __init__(self, logger: logging.Logger, test_mode: bool = False):
         self.logger = logger
         self.test_mode = test_mode
-        self.browser_use = BrowserUse()
+        # テストモードの場合はブラウザ操作が不要なのでBrowserUseを初期化しない
+        self.browser_use = None if test_mode else BrowserUse()
         self.stock_repository = StockRepository()
         self.api_handler = None
 
@@ -67,6 +69,9 @@ class AutoSellStock:
             evaluation = self.evaluate_holding_with_ai(code, current_price, historical_data)
             if evaluation:
                 evaluation_results[code] = evaluation
+                
+                # 評価結果をデータベースに保存
+                self.stock_repository.save_evaluation_result(evaluation, is_test=self.test_mode)
         
         return evaluation_results
 
@@ -171,24 +176,25 @@ class AutoSellStock:
 
     def get_holdings(self) -> Optional[Dict[str, str]]:
         """
-        証券口座から保有証券の情報を取得
+        entriesテーブルから保有証券の情報を取得
         
         Returns:
             Dict[str, str]: {証券コード: 現在価格} の形式、取得失敗時はNone
         """
         self.logger.info("保有証券情報の取得を開始")
-        prompt = self.browser_use._get_prompt()
-        response = self.browser_use.run(prompt)
         
-        if response:
-            try:
-                holdings = json.loads(response) if isinstance(response, str) else response
-                self.logger.info(f"取得した保有証券: {holdings}")
-                return holdings
-            except json.JSONDecodeError as e:
-                self.logger.error(f"保有証券情報のパースに失敗: {e}")
-                return None
-        return None
+        holdings = self.stock_repository.get_active_holdings(is_test=self.test_mode)
+        
+        if holdings is None:
+            self.logger.error("保有証券情報の取得に失敗しました")
+            return None
+        
+        if not holdings:
+            self.logger.info("保有証券が見つかりません")
+            return {}
+        
+        self.logger.info(f"取得した保有証券: {holdings}")
+        return holdings
 
     def get_stock_data(self, code: str) -> Optional[List[dict]]:
         """
@@ -222,6 +228,61 @@ class AutoSellStock:
             self.logger.error(f"株価データ取得中にエラーが発生: {e}")
             return None
 
+    def compare_and_update_evaluation(self, current: EvaluationResult, previous: Optional[Dict]) -> EvaluationResult:
+        """
+        現在の評価と前回の評価を比較し、必要に応じて更新
+        
+        Args:
+            current (EvaluationResult): 現在の評価結果
+            previous (Optional[Dict]): 前回の評価結果
+            
+        Returns:
+            EvaluationResult: 更新された評価結果
+        """
+        if not previous:
+            return current
+            
+        try:
+            # ストップロス更新ロジック
+            if current.stop_loss != "NG" and previous["stop_loss"] != "NG":
+                current_stop_loss = float(current.stop_loss)
+                previous_stop_loss = float(previous["stop_loss"])
+                
+                # 現在のストップロスが前回より高い場合（利益確保のため引き上げ）
+                if current_stop_loss > previous_stop_loss:
+                    current.stop_loss_update_reason = f"前回のストップロス({previous_stop_loss})から引き上げました"
+                    self.logger.info(f"ストップロスを更新: {previous_stop_loss} -> {current_stop_loss}")
+                # 現在のストップロスが前回より低い場合（損失拡大の可能性）
+                elif current_stop_loss < previous_stop_loss:
+                    # 前回のストップロスを維持するか判断
+                    if current.decision == "HOLD" and current.confidence_score < 700:
+                        current.stop_loss = previous["stop_loss"]
+                        current.stop_loss_update_reason = "前回のストップロスを維持します"
+                        self.logger.info(f"ストップロスを維持: {previous_stop_loss}")
+            
+            # 目標価格更新ロジック
+            if current.target_price != "NG" and previous["target_price"] != "NG":
+                current_target = float(current.target_price)
+                previous_target = float(previous["target_price"])
+                
+                # 現在の目標価格が前回より高い場合（上昇トレンド強化）
+                if current_target > previous_target:
+                    current.target_update_reason = f"前回の目標価格({previous_target})から引き上げました"
+                    self.logger.info(f"目標価格を更新: {previous_target} -> {current_target}")
+                # 現在の目標価格が前回より低い場合（上昇トレンド弱化）
+                elif current_target < previous_target:
+                    # 前回の目標価格を維持するか判断
+                    if current.decision == "HOLD" and current.confidence_score < 700:
+                        current.target_price = previous["target_price"]
+                        current.target_update_reason = "前回の目標価格を維持します"
+                        self.logger.info(f"目標価格を維持: {previous_target}")
+            
+            return current
+            
+        except Exception as e:
+            self.logger.error(f"評価結果の比較・更新中にエラーが発生: {e}")
+            return current
+
     def evaluate_holding_with_ai(self, code: str, current_price: str, historical_data: List[dict]) -> Optional[EvaluationResult]:
         """
         GeminiAPIを使用して保有株式を評価
@@ -235,6 +296,10 @@ class AutoSellStock:
             Optional[EvaluationResult]: 評価結果、評価失敗時はNone
         """
         try:
+            # 前回の評価結果を取得
+            previous_evaluation = self.stock_repository.get_previous_evaluation(code)
+            previous_evaluation_json = json_dumps(previous_evaluation, ensure_ascii=False) if previous_evaluation else "なし"
+            
             # Gemini APIへのプロンプトを構築
             prompt = f"""
             【前提】
@@ -248,11 +313,13 @@ class AutoSellStock:
             3. ボラティリティ（ボリンジャーバンド、ATR）
             4. 出来高分析
             5. 現在の株価位置
+            6. 前回評価時からの変化点分析
 
             【提供データ】
             証券コード: {code}
             現在価格: {current_price}
-            過去データ: {json.dumps(historical_data, ensure_ascii=False)}
+            過去データ: {json_dumps(historical_data, ensure_ascii=False)}
+            前回の評価結果: {previous_evaluation_json}
 
             【出力形式】（以下のJSON形式を厳守し、その他の内容は含めないでください）
             {{
@@ -260,7 +327,9 @@ class AutoSellStock:
                 "confidence_score": <0〜1000の整数>,
                 "reason": "判断の理由",
                 "stop_loss": "ストップロス価格（金額のみ）" or "NG",
-                "target_price": "目標価格（金額のみ）" or "NG"
+                "target_price": "目標価格（金額のみ）" or "NG",
+                "stop_loss_update_reason": "ストップロス更新の理由" or null,
+                "target_update_reason": "目標価格更新の理由" or null
             }}
             """
 
@@ -273,7 +342,12 @@ class AutoSellStock:
                 try:
                     evaluation_dict = json.loads(response) if isinstance(response, str) else response
                     self.logger.info(f"評価結果: {evaluation_dict}")
-                    return EvaluationResult.from_dict(code, evaluation_dict)
+                    evaluation_result = EvaluationResult.from_dict(code, evaluation_dict)
+                    
+                    # 前回の評価と比較・更新
+                    updated_evaluation = self.compare_and_update_evaluation(evaluation_result, previous_evaluation)
+                    return updated_evaluation
+                    
                 except json.JSONDecodeError as e:
                     self.logger.error(f"評価結果のパースに失敗: {e}")
                     return None

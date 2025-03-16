@@ -1338,4 +1338,167 @@ class StockRepository(BaseRepository):
             
         except Exception as e:
             self.logger.error(f"インジケーターデータの取得中にエラーが発生しました: {e}", exc_info=True)
-            return [] 
+            return []
+
+    def get_active_holdings(self, is_test: bool = False) -> Optional[Dict[str, str]]:
+        """
+        entriesテーブルからアクティブな保有証券情報を取得
+        
+        Args:
+            is_test (bool): テストモードかどうか
+            
+        Returns:
+            Dict[str, str]: {証券コード: 現在価格} の形式、取得失敗時はNone
+        """
+        try:
+            query = """
+                SELECT e.code, sp.close as current_price
+                FROM entries e
+                JOIN (
+                    SELECT code, close, date
+                    FROM all_stock_prices
+                    WHERE date = (SELECT MAX(date) FROM all_stock_prices)
+                ) sp ON e.code = sp.code
+                WHERE e.status = 'active' AND e.is_test = %s
+            """
+            
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:  # 通常のカーソルを使用
+                    cur.execute(query, (is_test,))
+                    results = cur.fetchall()
+                    
+                    if not results:
+                        return {}
+                        
+                    # タプルの添字でアクセス（0:code, 1:current_price）
+                    return {row[0]: str(row[1]) for row in results}
+                    
+        except Exception as e:
+            self.logger.error(f"保有証券情報の取得に失敗: {e}")
+            return None
+
+    def get_previous_evaluation(self, code: str) -> Optional[Dict[str, Any]]:
+        """
+        api_responseテーブルから最新の評価結果を取得
+        
+        Args:
+            code (str): 証券コード
+            
+        Returns:
+            Optional[Dict[str, Any]]: 評価結果の辞書、取得失敗時はNone
+        """
+        try:
+            query = """
+                SELECT 
+                    code, 
+                    close, 
+                    rule_stop_limit as stop_loss, 
+                    rule_top_price as target_price,
+                    reason,
+                    entry_score as confidence_score
+                FROM api_response
+                WHERE code = %s
+                ORDER BY update_when DESC
+                LIMIT 1
+            """
+            
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (code,))
+                    result = cur.fetchone()
+                    
+                    if not result:
+                        return None
+                    
+                    # タプルの添字でアクセス
+                    return {
+                        'code': result[0],
+                        'close': result[1],
+                        'stop_loss': result[2] if result[2] else 'NG',
+                        'target_price': result[3] if result[3] else 'NG',
+                        'reason': result[4] if result[4] else '',
+                        'confidence_score': int(result[5]) if result[5] is not None else 0,
+                        'decision': 'HOLD'  # デフォルト値
+                    }
+                    
+        except Exception as e:
+            logging.error(f"前回評価結果の取得に失敗: {e}")
+            return None
+
+    def save_evaluation_result(self, result: 'EvaluationResult', is_test: bool = False) -> bool:
+        """
+        評価結果をapi_responseテーブルに保存
+        
+        Args:
+            result (EvaluationResult): 評価結果
+            is_test (bool): テストモードかどうか
+            
+        Returns:
+            bool: 保存成功時はTrue、失敗時はFalse
+        """
+        try:
+            query = """
+                INSERT INTO api_response (
+                    date, code, close, 
+                    rule_stop_limit, rule_top_price, 
+                    reason, entry_score, update_when
+                ) VALUES (
+                    CURRENT_DATE, %s, %s, 
+                    %s, %s, 
+                    %s, %s, CURRENT_TIMESTAMP
+                )
+                ON CONFLICT (code) DO UPDATE SET
+                    date = CURRENT_DATE,
+                    close = EXCLUDED.close,
+                    rule_stop_limit = EXCLUDED.rule_stop_limit,
+                    rule_top_price = EXCLUDED.rule_top_price,
+                    reason = EXCLUDED.reason,
+                    entry_score = EXCLUDED.entry_score,
+                    update_when = CURRENT_TIMESTAMP
+            """
+            
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (
+                        result.code,
+                        result.stop_loss if result.stop_loss != "NG" else None,
+                        result.target_price if result.target_price != "NG" else None,
+                        result.reason,
+                        result.confidence_score,
+                    ))
+                    
+                    # 更新理由がある場合はapi_response_backupテーブルにも保存
+                    if result.stop_loss_update_reason or result.target_update_reason:
+                        backup_query = """
+                            INSERT INTO api_response_backup (
+                                date, code, close, 
+                                reason, rule_stop_limit, rule_top_price,
+                                update_when, is_test
+                            ) VALUES (
+                                CURRENT_DATE, %s, %s, 
+                                %s, %s, %s,
+                                CURRENT_TIMESTAMP, %s
+                            )
+                        """
+                        
+                        update_reason = ""
+                        if result.stop_loss_update_reason:
+                            update_reason += f"ストップロス更新: {result.stop_loss_update_reason}. "
+                        if result.target_update_reason:
+                            update_reason += f"目標価格更新: {result.target_update_reason}. "
+                            
+                        cur.execute(backup_query, (
+                            result.code,
+                            result.stop_loss if result.stop_loss != "NG" else None,
+                            update_reason,
+                            result.stop_loss if result.stop_loss != "NG" else None,
+                            result.target_price if result.target_price != "NG" else None,
+                            is_test
+                        ))
+                    
+                    conn.commit()
+                    return True
+                    
+        except Exception as e:
+            logging.error(f"評価結果の保存に失敗: {e}")
+            return False 
