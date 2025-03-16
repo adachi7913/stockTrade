@@ -1,5 +1,5 @@
 ---
-description: データベースのカラム設定
+description: stockTradeプロジェクトのデータベーススキーマ
 globs: 
 alwaysApply: false
 ---
@@ -34,7 +34,6 @@ AIによる株式エントリー判断の結果を格納するテーブル
 | total_tokens | integer | YES | - | 合計トークン数 |
 | processing_time | numeric(10,2) | YES | - | 処理時間 |
 | model_version | varchar(100) | YES | - | 使用モデルバージョン |
-| is_test | boolean | NO | false | テストモードでの実行フラグ |
 
 #### 制約
 
@@ -96,6 +95,7 @@ API応答結果のバックアップテーブル
 | score | integer | YES | - | スコア |
 | no_entry_span | integer | YES | - | エントリー禁止期間 |
 | update_when | timestamp | YES | - | 更新日時 |
+| is_test | boolean | NO | false | テストモードでの実行フラグ |
 
 ### backtest_results テーブル
 
@@ -197,7 +197,7 @@ API応答結果のバックアップテーブル
 | holding_period | integer | YES | - | 保有期間 |
 | risk_reward | numeric(10,2) | YES | - | リスク/リワード比 |
 | quantity | integer | YES | - | 数量 |
-| status | varchar(20) | YES | - | ステータス |
+| status | varchar(20) | YES | - | ステータス(active / closed) |
 | exit_date | date | YES | - | 売却日 |
 | exit_price | numeric(10,2) | YES | - | 売却価格 |
 | profit | numeric(10,2) | YES | - | 利益額 |
