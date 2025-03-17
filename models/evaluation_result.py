@@ -8,10 +8,23 @@ class EvaluationResult:
     decision: str  # "HOLD" or "SELL"
     confidence_score: int  # 0-1000
     reason: str
-    stop_loss: Optional[str]  # 価格 or "NG"
-    target_price: Optional[str]  # 価格 or "NG"
+    stop_loss: str
+    target_price: str
+    close: Optional[str] = None
     stop_loss_update_reason: Optional[str] = None  # ストップロス更新理由
     target_update_reason: Optional[str] = None  # 目標価格更新理由
+
+    def __init__(self, code: str, decision: str, confidence_score: int, 
+                 reason: str, stop_loss: str, target_price: str, close: str = None):
+        self.code = code
+        self.decision = decision
+        self.confidence_score = confidence_score
+        self.reason = reason
+        self.stop_loss = stop_loss
+        self.target_price = target_price
+        self.close = close  # 現在値を追加
+        self.stop_loss_update_reason = None
+        self.target_update_reason = None
 
     @classmethod
     def from_dict(cls, code: str, data: dict) -> 'EvaluationResult':
@@ -19,12 +32,11 @@ class EvaluationResult:
         return cls(
             code=code,
             decision=data.get('decision', 'HOLD'),
-            confidence_score=int(data.get('confidence_score', 0)),
+            confidence_score=data.get('confidence_score', 0),
             reason=data.get('reason', ''),
             stop_loss=data.get('stop_loss', 'NG'),
             target_price=data.get('target_price', 'NG'),
-            stop_loss_update_reason=data.get('stop_loss_update_reason'),
-            target_update_reason=data.get('target_update_reason')
+            close=data.get('close', None)  # closeを追加
         )
 
     def to_dict(self) -> dict:
@@ -36,6 +48,7 @@ class EvaluationResult:
             'reason': self.reason,
             'stop_loss': self.stop_loss,
             'target_price': self.target_price,
+            'close': self.close,
             'stop_loss_update_reason': self.stop_loss_update_reason,
             'target_update_reason': self.target_update_reason
         } 

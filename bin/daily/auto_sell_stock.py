@@ -71,7 +71,7 @@ class AutoSellStock:
                 evaluation_results[code] = evaluation
                 
                 # 評価結果をデータベースに保存
-                self.stock_repository.save_evaluation_result(evaluation, is_test=self.test_mode)
+                self.stock_repository.save_holding_evaluation(evaluation, is_test=self.test_mode)
         
         return evaluation_results
 
@@ -335,13 +335,15 @@ class AutoSellStock:
 
             # GeminiAPIにリクエスト送信
             if not self.api_handler:
-                self.api_handler = ApiHandler(historical_data)
+                self.api_handler = ApiHandler(historical_data, prompt)
             response = self.api_handler.call_gemini_api()
             
             if response:
                 try:
                     evaluation_dict = json.loads(response) if isinstance(response, str) else response
                     self.logger.info(f"評価結果: {evaluation_dict}")
+                    # current_priceを評価結果に追加
+                    evaluation_dict['close'] = current_price
                     evaluation_result = EvaluationResult.from_dict(code, evaluation_dict)
                     
                     # 前回の評価と比較・更新

@@ -4,6 +4,7 @@ import threading
 from datetime import date, datetime
 from typing import List, Dict, Optional, Any
 import json
+from models.evaluation_result import EvaluationResult
 
 from lib.table_category import TableCategory
 from .base_repository import BaseRepository
@@ -1425,80 +1426,78 @@ class StockRepository(BaseRepository):
             logging.error(f"前回評価結果の取得に失敗: {e}")
             return None
 
-    def save_evaluation_result(self, result: 'EvaluationResult', is_test: bool = False) -> bool:
+    def save_holding_evaluation(self, result: 'EvaluationResult', is_test: bool = False) -> bool:
         """
-        評価結果をapi_responseテーブルに保存
+        保有判断の評価結果を保存
         
         Args:
             result (EvaluationResult): 評価結果
             is_test (bool): テストモードかどうか
-            
+        
         Returns:
             bool: 保存成功時はTrue、失敗時はFalse
         """
         try:
-            query = """
-                INSERT INTO api_response (
-                    date, code, close, 
-                    rule_stop_limit, rule_top_price, 
-                    reason, entry_score, update_when
-                ) VALUES (
-                    CURRENT_DATE, %s, %s, 
-                    %s, %s, 
-                    %s, %s, CURRENT_TIMESTAMP
-                )
-                ON CONFLICT (code) DO UPDATE SET
-                    date = CURRENT_DATE,
-                    close = EXCLUDED.close,
-                    rule_stop_limit = EXCLUDED.rule_stop_limit,
-                    rule_top_price = EXCLUDED.rule_top_price,
-                    reason = EXCLUDED.reason,
-                    entry_score = EXCLUDED.entry_score,
-                    update_when = CURRENT_TIMESTAMP
-            """
-            
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
+                    # メインテーブルへの保存（UPSERT）
+                    query = """
+                        INSERT INTO holding_evaluations (
+                            date, code, close, stop_loss, target_price,
+                            decision, confidence_score, reason,
+                            stop_loss_update_reason, target_update_reason,
+                            is_test
+                        ) VALUES (
+                            CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                        ON CONFLICT (code, date, is_test) DO UPDATE SET
+                            close = EXCLUDED.close,
+                            stop_loss = EXCLUDED.stop_loss,
+                            target_price = EXCLUDED.target_price,
+                            decision = EXCLUDED.decision,
+                            confidence_score = EXCLUDED.confidence_score,
+                            reason = EXCLUDED.reason,
+                            stop_loss_update_reason = EXCLUDED.stop_loss_update_reason,
+                            target_update_reason = EXCLUDED.target_update_reason,
+                            update_when = CURRENT_TIMESTAMP
+                        RETURNING id;
+                    """
+                    
                     cur.execute(query, (
                         result.code,
+                        result.close,
                         result.stop_loss if result.stop_loss != "NG" else None,
                         result.target_price if result.target_price != "NG" else None,
-                        result.reason,
+                        result.decision,
                         result.confidence_score,
+                        result.reason,
+                        result.stop_loss_update_reason,
+                        result.target_update_reason,
+                        is_test
                     ))
                     
-                    # 更新理由がある場合はapi_response_backupテーブルにも保存
-                    if result.stop_loss_update_reason or result.target_update_reason:
-                        backup_query = """
-                            INSERT INTO api_response_backup (
-                                date, code, close, 
-                                reason, rule_stop_limit, rule_top_price,
-                                update_when, is_test
-                            ) VALUES (
-                                CURRENT_DATE, %s, %s, 
-                                %s, %s, %s,
-                                CURRENT_TIMESTAMP, %s
-                            )
-                        """
-                        
-                        update_reason = ""
-                        if result.stop_loss_update_reason:
-                            update_reason += f"ストップロス更新: {result.stop_loss_update_reason}. "
-                        if result.target_update_reason:
-                            update_reason += f"目標価格更新: {result.target_update_reason}. "
-                            
-                        cur.execute(backup_query, (
-                            result.code,
-                            result.stop_loss if result.stop_loss != "NG" else None,
-                            update_reason,
-                            result.stop_loss if result.stop_loss != "NG" else None,
-                            result.target_price if result.target_price != "NG" else None,
-                            is_test
-                        ))
+                    evaluation_id = cur.fetchone()[0]
                     
+                    # 履歴テーブルへの保存
+                    history_query = """
+                        INSERT INTO holding_evaluations_history (
+                            evaluation_id, date, code, close, stop_loss, target_price,
+                            decision, confidence_score, reason,
+                            stop_loss_update_reason, target_update_reason,
+                            update_when, is_test
+                        )
+                        SELECT id, date, code, close, stop_loss, target_price,
+                               decision, confidence_score, reason,
+                               stop_loss_update_reason, target_update_reason,
+                               update_when, is_test
+                        FROM holding_evaluations
+                        WHERE id = %s;
+                    """
+                    
+                    cur.execute(history_query, (evaluation_id,))
                     conn.commit()
                     return True
                     
         except Exception as e:
-            logging.error(f"評価結果の保存に失敗: {e}")
+            self.logger.error(f"保有判断の保存に失敗: {e}")
             return False 
