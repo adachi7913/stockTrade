@@ -1,5 +1,5 @@
 ---
-description: stockTradeプロジェクトのデータベーススキーマ
+description: stockTradeプロジェクトのデータベーススキーマ・カラム情報
 globs: 
 alwaysApply: false
 ---
@@ -210,6 +210,75 @@ API応答結果のバックアップテーブル
 #### 制約
 
 - **主キー**: `entries_pkey` (code, entry_date)
+
+### holding_evaluations テーブル
+
+保有株式の評価結果を格納するテーブル
+
+#### カラム定義
+
+| カラム名 | データ型 | NULL許可 | デフォルト値 | 説明 |
+|----------|----------|----------|--------------|------|
+| id | integer | NO | nextval('holding_evaluations_id_seq') | 主キー、自動採番 |
+| date | date | NO | CURRENT_DATE | 評価実施日 |
+| code | varchar(8) | NO | - | 証券コード |
+| close | numeric(10,2) | YES | - | 評価時点の株価 |
+| stop_loss | numeric(10,2) | YES | - | ストップロス価格 |
+| target_price | numeric(10,2) | YES | - | 目標価格 |
+| decision | varchar(10) | NO | - | 保有判断（HOLD/SELL） |
+| confidence_score | integer | YES | - | 確信度スコア（0-1000） |
+| reason | text | YES | - | 判断理由 |
+| stop_loss_update_reason | text | YES | - | ストップロス更新理由 |
+| target_update_reason | text | YES | - | 目標価格更新理由 |
+| update_when | timestamp | NO | CURRENT_TIMESTAMP | 更新日時 |
+| is_test | boolean | NO | FALSE | テストモードフラグ |
+
+#### 制約
+
+- **主キー**: `holding_evaluations_pkey` (id)
+- **ユニーク制約**: `holding_evaluations_code_date_is_test_key` (code, date, is_test)
+- **チェック制約**: `holding_evaluations_confidence_score_check` (confidence_score >= 0 AND confidence_score <= 1000)
+- **チェック制約**: `holding_evaluations_decision_check` (decision IN ('HOLD', 'SELL'))
+
+#### インデックス
+
+- `idx_holding_evaluations_code_date`: (code, date)
+- `idx_holding_evaluations_date`: date (ASC)
+
+### holding_evaluations_history テーブル
+
+保有株式の評価結果の履歴を格納するテーブル
+
+#### カラム定義
+
+| カラム名 | データ型 | NULL許可 | デフォルト値 | 説明 |
+|----------|----------|----------|--------------|------|
+| id | integer | NO | nextval('holding_evaluations_history_id_seq') | 主キー、自動採番 |
+| evaluation_id | integer | NO | - | 評価ID（holding_evaluationsの外部キー） |
+| date | date | NO | - | 評価実施日 |
+| code | varchar(8) | NO | - | 証券コード |
+| close | numeric(10,2) | YES | - | 評価時点の株価 |
+| stop_loss | numeric(10,2) | YES | - | ストップロス価格 |
+| target_price | numeric(10,2) | YES | - | 目標価格 |
+| decision | varchar(10) | NO | - | 保有判断（HOLD/SELL） |
+| confidence_score | integer | YES | - | 確信度スコア（0-1000） |
+| reason | text | YES | - | 判断理由 |
+| stop_loss_update_reason | text | YES | - | ストップロス更新理由 |
+| target_update_reason | text | YES | - | 目標価格更新理由 |
+| update_when | timestamp | NO | - | 更新日時 |
+| is_test | boolean | NO | - | テストモードフラグ |
+
+#### 制約
+
+- **主キー**: `holding_evaluations_history_pkey` (id)
+- **外部キー**: `holding_evaluations_history_evaluation_id_fkey` (evaluation_id) REFERENCES holding_evaluations(id)
+- **チェック制約**: `holding_evaluations_history_confidence_score_check` (confidence_score >= 0 AND confidence_score <= 1000)
+- **チェック制約**: `holding_evaluations_history_decision_check` (decision IN ('HOLD', 'SELL'))
+
+#### インデックス
+
+- `idx_holding_evaluations_history_evaluation_id`: evaluation_id (ASC)
+- `idx_holding_evaluations_history_code_date`: (code, date)
 
 ### stock_prices テーブル
 

@@ -7,8 +7,9 @@ import time  # リトライ用に追加
 import logging
 
 class ApiHandler:
-    def __init__(self, data, backtest_results=None, logger=None):
+    def __init__(self, data, prompt=None, backtest_results=None, logger=None):
         self.data = data
+        self.prompt = prompt if prompt else self.get_prompt()
         self.backtest_results = backtest_results or []
         self.logger = logger if logger else logging.getLogger()
 
@@ -177,7 +178,7 @@ class ApiHandler:
             return "API key not set"  # APIキーがない場合はエラーメッセージを返す
         model = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")  # 環境変数からモデル名を取得、デフォルト値を設定
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        prompt = self.get_prompt() # getPrompt関数でプロンプトを生成
+        prompt = self.prompt
         payload = {
             "contents": [
                 {
