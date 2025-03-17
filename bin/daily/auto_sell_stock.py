@@ -382,11 +382,11 @@ class AutoSellStock:
             current_price = float(evaluation.close)
             quantity = int(entry['quantity'])
             
-            profit_loss = (current_price - entry_price) * quantity
+            profit_loss = int((current_price - entry_price) * quantity)
             profit_rate = ((current_price / entry_price) - 1) * 100
             
             # 手数料計算（仮の計算方法、実際のロジックに合わせて調整）
-            fee = max(current_price * quantity * 0.0015, 100)  # 0.15%か最低100円
+            fee = int(max(current_price * quantity * 0.0015, 100))  # 0.15%か最低100円
             
             # 3. trade_resultsテーブルに売却結果を格納
             trade_result = {
@@ -431,7 +431,7 @@ class AutoSellStock:
         except Exception as e:
             self.logger.error(f"テスト売却処理中にエラーが発生: {e}")
 
-    def calculate_available_funds(self, profit_loss: float, fee: float) -> float:
+    def calculate_available_funds(self, profit_loss: float, fee: float) -> int:
         """
         テストモードでの利用可能資金を計算
         
@@ -440,7 +440,7 @@ class AutoSellStock:
             fee (float): 取引手数料
             
         Returns:
-            float: 更新後の利用可能資金
+            int: 更新後の利用可能資金
         """
         try:
             # 最新のテスト取引から現在の利用可能資金を取得
@@ -452,7 +452,7 @@ class AutoSellStock:
                 self.logger.info(f"テスト用初期資金を設定: {current_funds}円")
             
             # 売却後の資金を計算（損益 - 手数料）
-            updated_funds = current_funds + profit_loss - fee
+            updated_funds = int(current_funds + profit_loss - fee)
             self.logger.info(f"テスト用資金更新: {current_funds}円 → {updated_funds}円 (損益: {profit_loss}円, 手数料: {fee}円)")
             
             return updated_funds
