@@ -360,6 +360,107 @@ class AutoSellStock:
             self.logger.error(f"評価処理中にエラーが発生: {e}")
             return None
 
+    def execute_test_sell(self, code: str, evaluation: EvaluationResult) -> None:
+        """
+        テストモードでの売却処理を実行
+        
+        Args:
+            code (str): 証券コード
+            evaluation (EvaluationResult): 評価結果
+        """
+        try:
+            self.logger.info(f"テストモードで {code} の売却シミュレーションを実行")
+            
+            # 1. entriesテーブルからエントリー情報を取得
+            entry = self.stock_repository.get_entry_by_code(code, is_test=True)
+            if not entry:
+                self.logger.error(f"エントリー情報の取得に失敗: {code}")
+                return
+                
+            # 2. 損益を算出
+            entry_price = float(entry['entry_price'])
+            current_price = float(evaluation.close)
+            quantity = int(entry['quantity'])
+            
+            profit_loss = (current_price - entry_price) * quantity
+            profit_rate = ((current_price / entry_price) - 1) * 100
+            
+            # 手数料計算（仮の計算方法、実際のロジックに合わせて調整）
+            fee = max(current_price * quantity * 0.0015, 100)  # 0.15%か最低100円
+            
+            # 3. trade_resultsテーブルに売却結果を格納
+            trade_result = {
+                'trade_type': 'close',
+                'symbol_code': code,
+                'entry_datetime': entry['entry_date'],
+                'close_datetime': self.stock_repository.get_current_datetime(),
+                'entry_price': entry_price,
+                'close_price': current_price,
+                'quantity': quantity,
+                'profit_loss': profit_loss,
+                'available_funds': self.calculate_available_funds(profit_loss, fee),  # テスト用資金を計算
+                'fee': fee,
+                'order_type': 'market',
+                'position': 'long',
+                'note': f"テスト売却: {evaluation.reason} (確信度: {evaluation.confidence_score})",
+                'is_test': True
+            }
+            
+            # 売却結果をデータベースに保存
+            trade_id = self.stock_repository.save_trade_result(trade_result)
+            
+            # entriesテーブルの更新
+            entry_update = {
+                'code': code,
+                'status': 'closed',
+                'exit_date': self.stock_repository.get_current_date(),
+                'exit_price': current_price,
+                'profit': profit_loss,
+                'profit_rate': profit_rate,
+                'exit_reason': evaluation.reason,
+                'is_test': True
+            }
+            
+            # エントリー情報を更新
+            self.stock_repository.update_entry(entry_update)
+            
+            self.logger.info(f"テスト売却完了: {code}")
+            self.logger.info(f"損益: {profit_loss}円 ({profit_rate:.2f}%)")
+            self.logger.info(f"売却理由: {evaluation.reason}")
+            
+        except Exception as e:
+            self.logger.error(f"テスト売却処理中にエラーが発生: {e}")
+
+    def calculate_available_funds(self, profit_loss: float, fee: float) -> float:
+        """
+        テストモードでの利用可能資金を計算
+        
+        Args:
+            profit_loss (float): 売却による損益
+            fee (float): 取引手数料
+            
+        Returns:
+            float: 更新後の利用可能資金
+        """
+        try:
+            # 最新のテスト取引から現在の利用可能資金を取得
+            current_funds = self.stock_repository.get_latest_test_funds()
+            
+            # 利用可能資金がない場合は初期値を設定
+            if current_funds is None:
+                current_funds = 1000000  # 初期資金100万円（設定に応じて変更）
+                self.logger.info(f"テスト用初期資金を設定: {current_funds}円")
+            
+            # 売却後の資金を計算（損益 - 手数料）
+            updated_funds = current_funds + profit_loss - fee
+            self.logger.info(f"テスト用資金更新: {current_funds}円 → {updated_funds}円 (損益: {profit_loss}円, 手数料: {fee}円)")
+            
+            return updated_funds
+            
+        except Exception as e:
+            self.logger.error(f"テスト用資金計算中にエラーが発生: {e}")
+            return 0  # エラー時は0を返す
+
 def main():
     """メイン処理"""
     # ロガーの設定
@@ -376,50 +477,69 @@ def main():
         # AutoSellStockインスタンスの作成
         auto_sell = AutoSellStock(logger, test_mode=args.test)
         
-        # 保有証券の評価を実行
-        evaluation_results = auto_sell.run_evaluation()
-        if not evaluation_results:
-            logger.error("評価結果の取得に失敗しました")
+        # 保有証券情報の取得
+        holdings = auto_sell.get_holdings()
+        if not holdings:
+            logger.error("保有証券情報の取得に失敗しました")
             return
-
-        # 評価結果のサマリーを表示
-        auto_sell.print_evaluation_summary(evaluation_results)
-
-        # 売却判断の実行
-        sell_candidates = []
-        for code, evaluation in evaluation_results.items():
-            if evaluation.decision == "SELL" and evaluation.confidence_score >= 500:
-                sell_candidates.append((code, evaluation))
-
-        if not sell_candidates:
-            logger.info("売却候補はありません")
+            
+        if not holdings:
+            logger.info("保有証券が見つかりません")
             return
-
-        # 売却候補の表示
-        logger.info("\n売却候補:")
-        for code, evaluation in sell_candidates:
-            logger.info(f"証券コード: {code}")
+            
+        logger.info(f"取得した保有証券: {holdings}")
+        
+        # 各銘柄ごとに処理を実行
+        for code, current_price in holdings.items():
+            logger.info(f"\n===== 証券コード {code} の処理を開始 =====")
+            
+            # 1. 過去の価格とインジケーターを取得
+            historical_data = auto_sell.get_stock_data(code)
+            if not historical_data:
+                logger.error(f"証券コード {code} の株価データ取得に失敗しました")
+                continue
+                
+            # 2. 評価を実行
+            evaluation = auto_sell.evaluate_holding_with_ai(code, current_price, historical_data)
+            if not evaluation:
+                logger.error(f"証券コード {code} の評価に失敗しました")
+                continue
+                
+            # 3. 評価結果をデータベースに保存
+            auto_sell.stock_repository.save_holding_evaluation(evaluation, is_test=args.test)
+            
+            # 4. 評価結果のサマリーを表示
+            logger.info(f"\n証券コード: {code}")
+            logger.info(f"判断: {evaluation.decision}")
             logger.info(f"確信度: {evaluation.confidence_score}")
             logger.info(f"理由: {evaluation.reason}")
             logger.info(f"ストップロス: {evaluation.stop_loss}")
             logger.info(f"目標価格: {evaluation.target_price}")
-
-        # テストモードの場合は売却を実行しない
-        if args.test:
-            logger.info("テストモードのため、売却は実行されません")
-            return
-
-        # 強制売却モードの場合は確認なしで売却を実行
-        if args.force_sell:
-            logger.info("強制売却モードで実行します")
-            for code, evaluation in sell_candidates:
-                auto_sell.execute_sell(code, evaluation)
-            return
-
-        # 売却の確認
-        for code, evaluation in sell_candidates:
-            if input(f"\n{code}を売却しますか？ (y/n): ").lower() == 'y':
-                auto_sell.execute_sell(code, evaluation)
+            
+            # 5. 売却判断
+            if evaluation.decision == "SELL" and evaluation.confidence_score >= 500:
+                logger.info(f"\n証券コード {code} は売却候補です")
+                
+                # テストモードの場合
+                if args.test:
+                    logger.info(f"テストモードのため、実際の売却は実行されません")
+                    logger.info(f"テストモードでの売却シミュレーションを実行します")
+                    auto_sell.execute_test_sell(code, evaluation)
+                    continue
+                
+                # 強制売却モードの場合
+                if args.force_sell:
+                    logger.info(f"強制売却モードで {code} を売却します")
+                    auto_sell.execute_sell(code, evaluation)
+                    continue
+                
+                # 通常モードの場合は確認を求める
+                if input(f"\n{code}を売却しますか？ (y/n): ").lower() == 'y':
+                    auto_sell.execute_sell(code, evaluation)
+            else:
+                logger.info(f"証券コード {code} は保有継続と判断されました")
+            
+            logger.info(f"===== 証券コード {code} の処理を完了 =====\n")
 
     except Exception as e:
         logger.error(f"エラーが発生しました: {e}")
