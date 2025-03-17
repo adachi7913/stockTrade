@@ -1,7 +1,7 @@
 ---
-description: stockTradeプロジェクトのデータベーススキーマ・カラム情報
+description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 # stockTradeプロジェクトのデータベーススキーマ
 

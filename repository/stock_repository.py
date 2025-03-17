@@ -1448,7 +1448,7 @@ class StockRepository(BaseRepository):
                             stop_loss_update_reason, target_update_reason,
                             is_test
                         ) VALUES (
-                            CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s
                         )
                         ON CONFLICT (code, date, is_test) DO UPDATE SET
                             close = EXCLUDED.close,
@@ -1500,4 +1500,140 @@ class StockRepository(BaseRepository):
                     
         except Exception as e:
             self.logger.error(f"保有判断の保存に失敗: {e}")
-            return False 
+            return False
+
+    def get_entry_by_code(self, code: str, is_test: bool = False) -> Optional[Dict]:
+        """
+        証券コードからエントリー情報を取得
+        
+        Args:
+            code (str): 証券コード
+            is_test (bool): テストモードフラグ
+            
+        Returns:
+            Optional[Dict]: エントリー情報、取得失敗時はNone
+        """
+        try:
+            query = """
+                SELECT * FROM entries 
+                WHERE code = %s AND status = 'active' AND is_test = %s
+            """
+            params = (code, is_test)
+            
+            self.cur.execute(query, params)
+            result = self.cur.fetchone()
+            
+            if not result:
+                return None
+                
+            # カラム名を取得
+            column_names = [desc[0] for desc in self.cur.description]
+            
+            # 結果を辞書に変換
+            entry_dict = {}
+            for i, value in enumerate(result):
+                entry_dict[column_names[i]] = value
+                
+            return entry_dict
+        except Exception as e:
+            self.logger.error(f"エントリー情報の取得に失敗: {e}")
+            return None
+
+    def get_current_date(self) -> str:
+        """現在の日付を取得"""
+        return datetime.now().strftime('%Y-%m-%d')
+
+    def get_current_datetime(self) -> datetime:
+        """現在の日時を取得"""
+        return datetime.now()
+
+    def save_trade_result(self, trade_result: Dict) -> Optional[int]:
+        """
+        売却結果をデータベースに保存
+        
+        Args:
+            trade_result (Dict): 売却結果
+            
+        Returns:
+            Optional[int]: 挿入されたレコードのID、失敗時はNone
+        """
+        try:
+            columns = ', '.join(trade_result.keys())
+            placeholders = ', '.join(['%s'] * len(trade_result))
+            
+            query = f"""
+                INSERT INTO trade_results ({columns})
+                VALUES ({placeholders})
+                RETURNING trade_id
+            """
+            
+            params = tuple(trade_result.values())
+            self.cur.execute(query, params)
+            result = self.cur.fetchone()
+            
+            self.conn.commit()
+            return result[0] if result else None
+        except Exception as e:
+            self.logger.error(f"売却結果の保存に失敗: {e}")
+            self.conn.rollback()
+            return None
+
+    def update_entry(self, entry_update: Dict) -> bool:
+        """
+        エントリー情報を更新
+        
+        Args:
+            entry_update (Dict): 更新するエントリー情報
+            
+        Returns:
+            bool: 更新成功時はTrue、失敗時はFalse
+        """
+        try:
+            code = entry_update.pop('code')
+            is_test = entry_update.pop('is_test', False)
+            
+            set_clause = ', '.join([f"{k} = %s" for k in entry_update.keys()])
+            
+            query = f"""
+                UPDATE entries
+                SET {set_clause}, updated_at = CURRENT_TIMESTAMP
+                WHERE code = %s AND is_test = %s
+            """
+            
+            params = tuple(entry_update.values()) + (code, is_test)
+            self.cur.execute(query, params)
+            self.conn.commit()
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"エントリー情報の更新に失敗: {e}")
+            self.conn.rollback()
+            return False
+
+    def get_latest_test_funds(self) -> Optional[float]:
+        """
+        最新のテスト取引から利用可能資金を取得
+        
+        Returns:
+            Optional[float]: 最新の利用可能資金、取得失敗時はNone
+        """
+        try:
+            query = """
+                SELECT available_funds
+                FROM trade_results
+                WHERE is_test = true
+                ORDER BY created_at DESC
+                LIMIT 1
+            """
+            
+            self.cur.execute(query)
+            result = self.cur.fetchone()
+            
+            if result:
+                return float(result[0])
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"テスト用資金の取得に失敗: {e}")
+            return None 
