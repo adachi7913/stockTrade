@@ -1610,12 +1610,12 @@ class StockRepository(BaseRepository):
             self.conn.rollback()
             return False
 
-    def get_latest_test_funds(self) -> Optional[float]:
+    def get_latest_test_funds(self) -> Optional[int]:
         """
         最新のテスト取引から利用可能資金を取得
         
         Returns:
-            Optional[float]: 最新の利用可能資金、取得失敗時はNone
+            Optional[int]: 最新の利用可能資金、取得失敗時はNone
         """
         try:
             query = """
@@ -1630,7 +1630,7 @@ class StockRepository(BaseRepository):
             result = self.cur.fetchone()
             
             if result:
-                return float(result[0])
+                return int(float(result[0]))
             
             return None
             
