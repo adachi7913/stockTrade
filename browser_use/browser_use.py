@@ -19,20 +19,9 @@ load_dotenv()
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
-# ロガーの設定
-logger = setup_logging("browser_use")
-logger.setLevel(logging.INFO)
-
-# ファイルハンドラーの設定
-log_dir = Path("log")
-log_dir.mkdir(exist_ok=True)
-log_file = log_dir / "browser_use.log"
-file_handler = logging.FileHandler(log_file, encoding='utf-8')
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-logger.addHandler(file_handler)
-
 class BrowserUse:
     def __init__(self):
+        logger = setup_logging("browser_use")
         self.logger = logger
         self.client = self._initialize_client()
         self.logger.info("Gradioクライアントの初期化が完了しました")
