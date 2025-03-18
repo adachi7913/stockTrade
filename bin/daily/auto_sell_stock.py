@@ -333,9 +333,8 @@ class AutoSellStock:
             }}
             """
 
-            # GeminiAPIにリクエスト送信
-            if not self.api_handler:
-                self.api_handler = ApiHandler(historical_data, prompt)
+            # 各評価ごとに新しいAPIハンドラを作成するように修正
+            self.api_handler = ApiHandler(historical_data, prompt)
             response = self.api_handler.call_gemini_api()
             
             if response:
