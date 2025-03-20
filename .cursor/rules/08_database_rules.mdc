@@ -188,6 +188,7 @@ API応答結果のバックアップテーブル
 
 | カラム名 | データ型 | NULL許可 | デフォルト値 | 説明 |
 |----------|----------|----------|--------------|------|
+| trade_id | integer | NO | nextval('trade_results_trade_id_seq') | 主キー、自動採番 |
 | code | varchar(10) | NO | - | 証券コード |
 | entry_date | date | NO | - | エントリー日 |
 | entry_price | numeric(10,2) | NO | - | エントリー価格 |

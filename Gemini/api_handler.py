@@ -7,11 +7,6 @@ import time  # リトライ用に追加
 import logging
 
 class ApiHandler:
-    def __init__(self, data, prompt=None, backtest_results=None, logger=None):
-        self.data = data
-        self.prompt = prompt if prompt else self.get_prompt()
-        self.backtest_results = backtest_results or []
-        self.logger = logger if logger else logging.getLogger()
 
     def get_prompt(self):
         # Decimal 型の値を float に変換するヘルパー関数
@@ -159,6 +154,11 @@ class ApiHandler:
         """
         return prompt
 
+    def __init__(self, data, prompt=None, backtest_results=None, logger=None):
+        self.data = data
+        self.backtest_results = backtest_results or []
+        self.logger = logger if logger else logging.getLogger()
+        self.prompt = prompt if prompt else self.get_prompt()
 
     def _extract_json(self, content):
         """

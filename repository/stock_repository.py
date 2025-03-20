@@ -1360,7 +1360,9 @@ class StockRepository(BaseRepository):
                     FROM all_stock_prices
                     WHERE date = (SELECT MAX(date) FROM all_stock_prices)
                 ) sp ON e.code = sp.code
-                WHERE e.status = 'active' AND e.is_test = %s
+                WHERE e.status = 'active' 
+                AND e.is_test = %s
+                AND e.entry_date < CURRENT_DATE
             """
             
             with self.get_connection() as conn:

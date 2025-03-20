@@ -27,7 +27,7 @@ class EntryJudgmentHandler:
     Gemini Pro APIにプロンプトを送信し、エントリーの可否、信頼度、理由などを取得します。
     """
     
-    def __init__(self, api_key: str, logger: Optional[logging.Logger] = None):
+    def __init__(self, api_key: str, logger: Optional[logging.Logger] = None, test_mode: bool = False):
         """
         Gemini Proの設定とAPIキーの初期化を行います。
         
@@ -52,7 +52,10 @@ class EntryJudgmentHandler:
                 self.logger.addHandler(handler)
         
         # モデル設定
-        model_name = os.getenv('GEMINI_PURCHASE_MODEL', 'gemini-pro')
+        if test_mode:
+            model_name = os.getenv('GEMINI_THINKING_MODEL', 'gemini-1.5-flash')
+        else:
+            model_name = os.getenv('GEMINI_PURCHASE_MODEL', 'gemini-pro')
         self.model = genai.GenerativeModel(model_name)
         self.logger.info(f"EntryJudgmentHandler initialized with model: {model_name}")
 

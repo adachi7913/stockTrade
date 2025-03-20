@@ -64,9 +64,13 @@ class StockPurchaseManager:
         """
         load_dotenv()
         self.entry_repository = EntryRepository()
+        # テストモード（実際の購入処理をスキップ）
+        # 引数とコマンドライン引数と環境変数から設定を読み込む
+        self.test_mode = test_mode or os.getenv('STOCK_TEST_MODE', 'false').lower() == 'true'
         self.judgment_handler = EntryJudgmentHandler(
             api_key=os.getenv('GEMINI_API_KEY'),
-            logger=logger
+            logger=logger,
+            test_mode=self.test_mode
         )
         self.logger = logger
         
@@ -75,9 +79,6 @@ class StockPurchaseManager:
         self.min_entry_score = min_entry_score
         self.api_delay = api_delay
         
-        # テストモード（実際の購入処理をスキップ）
-        # 引数とコマンドライン引数と環境変数から設定を読み込む
-        self.test_mode = test_mode or os.getenv('STOCK_TEST_MODE', 'false').lower() == 'true'
         
         if self.test_mode:
             self.logger.info("テストモードが有効です。実際の購入処理はスキップされます。")

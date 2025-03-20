@@ -177,11 +177,19 @@ def parse_response(full_data, response, code=None, logger=None):
         rule = response_data.get("rule", {})
         
         # 数値型の場合は文字列に変換する処理を追加
-        rule_entry_price = str(rule.get("entryPrice", "NG"))
-        rule_stop_limit = str(rule.get("stop_loss", rule.get("sl", "NG")))  # stop_lossとslの両方に対応
-        rule_top_price = str(rule.get("target_price", rule.get("tp", "NG")))  # target_priceとtpの両方に対応
-        rule_period = str(rule.get("period", "NG"))
-        risk_reward = str(rule.get("risk_reward", rule.get("riskReward", "NG")))  # risk_rewardとriskRewardの両方に対応
+        if isinstance(rule, str):
+            # rule が文字列の場合（"NG"など）は空の辞書として扱う
+            rule_entry_price = "NG"
+            rule_stop_limit = "NG"
+            rule_top_price = "NG"
+            rule_period = "NG"
+            risk_reward = "NG"
+        else:
+            rule_entry_price = str(rule.get("entryPrice", "NG"))
+            rule_stop_limit = str(rule.get("stop_loss", rule.get("sl", "NG")))  # stop_lossとslの両方に対応
+            rule_top_price = str(rule.get("target_price", rule.get("tp", "NG")))  # target_priceとtpの両方に対応
+            rule_period = str(rule.get("period", "NG"))
+            risk_reward = str(rule.get("risk_reward", rule.get("riskReward", "NG")))  # risk_rewardとriskRewardの両方に対応
         
         # 新しいフィールドの取得
         entry_conditions = response_data.get("entry_conditions", "")
