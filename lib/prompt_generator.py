@@ -73,13 +73,13 @@ class PromptGenerator:
             day_num = idx + 1
             date = day_data.get('date', '不明')
             prompt += f"""
-{day_num}日前 ({date})
-- 価格: 終値={day_data.get('close', 0):.1f}円
-- RSI: {day_data.get('rsi', 0):.1f}
-- ストキャスティクス %K: {day_data.get('stoch_k', 0):.1f}
-- ADX: {day_data.get('adx', 0):.1f}
-- MACD: {day_data.get('macd', 0):.2f}
-"""
+            {day_num}日前 ({date})
+            - 価格: 終値={day_data.get('close', 0):.1f}円
+            - RSI: {day_data.get('rsi', 0):.1f}
+            - ストキャスティクス %K: {day_data.get('stoch_k', 0):.1f}
+            - ADX: {day_data.get('adx', 0):.1f}
+            - MACD: {day_data.get('macd', 0):.2f}
+            """
 
         # バックテスト結果のサマリー
         prompt += f"""
@@ -92,9 +92,9 @@ class PromptGenerator:
         # 判断指示を追加
         prompt += f"""
 ## 判断指示
-この銘柄へのエントリー（購入）が推奨されるかどうかを判断してください。
+この銘柄へのエントリー（購入）が推奨されるかどうかを判断し、結果を**日本語で回答**してください。
 
-以下の形式で回答してください:
+回答は以下の形式で格納してください:
 ```json
 {{
   "should_enter": true/false,

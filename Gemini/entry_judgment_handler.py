@@ -53,9 +53,10 @@ class EntryJudgmentHandler:
         
         # モデル設定
         if test_mode:
-            model_name = os.getenv('GEMINI_THINKING_MODEL', 'gemini-1.5-flash')
+            model_name = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
         else:
             model_name = os.getenv('GEMINI_PURCHASE_MODEL', 'gemini-pro')
+        self.logger.info(f"model_name: {model_name}")
         self.model = genai.GenerativeModel(model_name)
         self.logger.info(f"EntryJudgmentHandler initialized with model: {model_name}")
 

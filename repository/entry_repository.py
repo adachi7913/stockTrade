@@ -12,6 +12,7 @@ class EntryRepository(BaseRepository):
     def fetch_best_entry_candidates(self, min_score: int = 700, limit: int = 400) -> List[Dict]:
         """
         エントリースコアが指定値以上のデータを一日辺りの期待リターンの降順で取得します
+        また、すでに保有している証券（entries.status = 'active'）を除外します
         
         Args:
             min_score (int): 最小エントリースコア（デフォルト: 700）
@@ -42,17 +43,22 @@ class EntryRepository(BaseRepository):
 
             query = """
             SELECT 
-                code, date, close, rule_entry_price, rule_stop_limit,
-                rule_top_price, rule_period, risk_reward, entry_score,
-                expected_return, reason, entry_conditions, exit_conditions,
-                short_term_trend, mid_term_trend, long_term_trend,
-                support_resistance, technical_patterns, indicator_analysis,
-                no_entry_span
-            FROM api_response
-            WHERE entry_score >= %s
+                a.code, a.date, a.close, a.rule_entry_price, a.rule_stop_limit,
+                a.rule_top_price, a.rule_period, a.risk_reward, a.entry_score,
+                a.expected_return, a.reason, a.entry_conditions, a.exit_conditions,
+                a.short_term_trend, a.mid_term_trend, a.long_term_trend,
+                a.support_resistance, a.technical_patterns, a.indicator_analysis,
+                a.no_entry_span
+            FROM api_response a
+            WHERE a.entry_score >= %s
+            AND NOT EXISTS (
+                SELECT 1 FROM entries e 
+                WHERE e.code = a.code 
+                AND e.status = 'active'
+            )
             ORDER BY CASE 
-                WHEN rule_period ~ E'^\\d+$' AND CAST(rule_period AS INTEGER) > 0 
-                THEN CAST(expected_return AS NUMERIC) / CAST(rule_period AS INTEGER) 
+                WHEN a.rule_period ~ E'^\\d+$' AND CAST(a.rule_period AS INTEGER) > 0 
+                THEN CAST(a.expected_return AS NUMERIC) / CAST(a.rule_period AS INTEGER) 
                 ELSE 0 
             END DESC
             LIMIT %s;
