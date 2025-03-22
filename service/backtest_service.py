@@ -436,41 +436,71 @@ def run_backtest(symbol: str, start_date: str, end_date: str, strategy_type: str
         log.info("指定された期間のデータが見つかりませんでした。")
         return None
         
-    # データの品質チェック
-    log.debug(f"取得データ: {len(data_df)}行, カラム={list(data_df.columns)}")
-    
-    # データの先頭と末尾を確認
-    log.debug(f"先頭のデータ: \n{data_df.head(3)}")
-    log.debug(f"末尾のデータ: \n{data_df.tail(3)}")
-    
-    # 欠損値や0値のチェック
-    zero_counts = (data_df == 0).sum()
-    null_counts = data_df.isnull().sum()
-    
-    if null_counts.sum() > 0:
-        log.warning(f"欠損値が存在します: {null_counts}")
+    # データの品質チェックを強化
+    try:
+        # 0値や極端な値のチェックと修正を追加
+        for col in ['open', 'high', 'low', 'close']:
+            # 0値や極小値を処理（最小値を設定）
+            min_valid_price = 0.1  # 最小有効価格
+            zero_or_tiny_mask = data_df[col] <= min_valid_price
+            if zero_or_tiny_mask.any():
+                zero_count = zero_or_tiny_mask.sum()
+                log.warning(f"{col}列に{zero_count}個の無効な値（0または極小値）があります。最小値に置換します。")
+                
+                # 前後の有効な値の平均か、固定値で置換
+                if col == 'close' and zero_or_tiny_mask.any():
+                    # 0や極小値を処理 - 直前の有効な値で置換
+                    data_df[col] = data_df[col].replace(0, None)
+                    data_df[col] = data_df[col].mask(data_df[col] <= min_valid_price)
+                    data_df[col] = data_df[col].fillna(method='ffill')  # 前方から埋める
+                    data_df[col] = data_df[col].fillna(method='bfill')  # 後方から埋める（前方に有効値がない場合）
+                    data_df[col] = data_df[col].fillna(min_valid_price)  # それでも埋まらない場合は最小値
+
+        # 出来高のゼロ値処理
+        if (data_df['volume'] == 0).any():
+            zero_volume_count = (data_df['volume'] == 0).sum()
+            log.warning(f"volume列に{zero_volume_count}個のゼロ値があります。最小値に置換します。")
+            data_df['volume'] = data_df['volume'].replace(0, 1)  # 最小出来高を1に設定
+            
+        # 安全のため、再度NaN値をチェックして処理
+        if data_df.isnull().any().any():
+            log.warning(f"データに欠損値が存在します。適切に補完します。")
+            # 各カラムごとに適切な方法で欠損値を補完
+            for col in data_df.columns:
+                data_df[col] = data_df[col].fillna(method='ffill')
+                data_df[col] = data_df[col].fillna(method='bfill')
         
-    # 価格や出来高が0の行がある場合は警告
-    if zero_counts['close'] > 0 or zero_counts['volume'] > 0:
-        log.warning(f"価格または出来高が0のデータが存在します: {zero_counts}")
-    
-    # データ期間が短すぎないかチェック
-    if len(data_df) < 30:  # 最低30日分必要
-        log.warning(f"データ期間が短すぎます ({len(data_df)}行). 30行以上推奨です。")
-
-    # 無効なデータを除外（株価が0または欠損値）
-    original_len = len(data_df)
-    data_df = data_df[data_df['close'] > 0]  # 終値が0より大きい行のみ残す
-    data_df = data_df.dropna(subset=['open', 'high', 'low', 'close', 'volume'])  # 欠損値を含む行を削除
-    filtered_len = len(data_df)
-    
-    if original_len > filtered_len:
-        log.warning(f"無効なデータを {original_len - filtered_len} 行除外しました。残り {filtered_len} 行。")
-    
-    if filtered_len < 30:  # フィルタリング後のデータが少なすぎる場合
-        log.error(f"有効なデータが不足しています ({filtered_len}行)。バックテストを中止します。")
+        # 最終チェック - 数値型カラムのみを対象に有効であることを確認
+        # 日付カラムは除外して数値カラムのみを取得
+        numeric_cols = data_df.select_dtypes(include=['number']).columns
+        
+        if data_df.isnull().any().any() or (data_df[numeric_cols] <= 0).any().any():
+            # 問題が解決できなかった場合
+            # 数値カラムのみについて、0以下またはNaN値の行を特定
+            problematic_numeric = pd.Series(False, index=data_df.index)
+            for col in numeric_cols:
+                problematic_numeric = problematic_numeric | (data_df[col] <= 0) | data_df[col].isnull()
+                
+            problematic_rows = data_df[problematic_numeric]
+            log.error(f"データクリーニング後も{len(problematic_rows)}行の問題が残っています。これらの行を削除します。")
+            
+            # NaN値の行を削除
+            data_df = data_df.dropna()
+            
+            # 数値カラムが0以下の行を削除
+            numeric_mask = (data_df[numeric_cols] > 0).all(axis=1)
+            data_df = data_df[numeric_mask]
+        
+        if len(data_df) < 30:
+            log.error(f"クリーニング後のデータが不足しています（{len(data_df)}行）。バックテストを中止します。")
+            return None
+            
+    except Exception as e:
+        log.error(f"データクリーニング中にエラー: {e}")
+        import traceback
+        log.error(traceback.format_exc())
         return None
-
+        
     # 日付をdatetime型に変換し、インデックスに設定します。
     data_df['date'] = pd.to_datetime(data_df['date'])
     data_df.set_index('date', inplace=True)

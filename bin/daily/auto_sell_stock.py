@@ -303,7 +303,7 @@ class AutoSellStock:
             # Gemini APIへのプロンプトを構築
             prompt = f"""
             【前提】
-            英語で思考し、**日本語のみ**で回答してください。
+            **日本語のみ**で回答してください。
             あなたは優秀な個人投資家かつトレード戦略構築のエキスパートです。
             保有中の株式について、過去のデータや各種テクニカル指標をもとに、保有継続の判断を行ってください。
 
@@ -336,6 +336,7 @@ class AutoSellStock:
             # 各評価ごとに新しいAPIハンドラを作成するように修正
             self.api_handler = ApiHandler(historical_data, prompt)
             response = self.api_handler.call_gemini_api()
+            self.logger.info(f"response: {response}")
             
             if response:
                 try:
@@ -384,8 +385,11 @@ class AutoSellStock:
             profit_loss = int((current_price - entry_price) * quantity)
             profit_rate = ((current_price / entry_price) - 1) * 100
             
-            # 手数料計算（仮の計算方法、実際のロジックに合わせて調整）
-            fee = int(max(current_price * quantity * 0.0015, 100))  # 0.15%か最低100円
+            # 約定代金を計算
+            transaction_amount = current_price * quantity
+            
+            # 手数料計算
+            fee = self.calculate_fee(transaction_amount)
             
             # 3. trade_resultsテーブルに売却結果を格納
             trade_result = {
@@ -459,6 +463,33 @@ class AutoSellStock:
         except Exception as e:
             self.logger.error(f"テスト用資金計算中にエラーが発生: {e}")
             return 0  # エラー時は0を返す
+
+    def calculate_fee(self, transaction_amount):
+        """
+        取引手数料を計算する
+        
+        Args:
+            transaction_amount (float): 約定代金（現在価格×数量）
+            
+        Returns:
+            int: 手数料（税込）
+        """
+        if transaction_amount <= 50000:  # 5万円まで
+            return 55
+        elif transaction_amount <= 100000:  # 10万円まで
+            return 99
+        elif transaction_amount <= 200000:  # 20万円まで
+            return 115
+        elif transaction_amount <= 500000:  # 50万円まで
+            return 275
+        elif transaction_amount <= 1000000:  # 100万円まで
+            return 535
+        elif transaction_amount <= 1500000:  # 150万円まで
+            return 640
+        elif transaction_amount <= 30000000:  # 3,000万円まで
+            return 1013
+        else:  # 3,000万円超
+            return 1070
 
 def main():
     """メイン処理"""

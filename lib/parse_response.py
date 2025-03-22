@@ -117,7 +117,15 @@ def validate_response_data(data, logger=None):
     no_entry_span = data['no_entry_span']
     if not (1 <= no_entry_span <= 14):
         log.error(f"no_entry_span out of range: {data['no_entry_span']}")
-        return False
+        # 範囲外の場合は自動的に修正する
+        if no_entry_span > 14:
+            log.warning(f"no_entry_span が14を超えています。14に制限します: {no_entry_span} -> 14")
+            data['no_entry_span'] = 14
+        elif no_entry_span < 1:
+            log.warning(f"no_entry_span が1未満です。1に制限します: {no_entry_span} -> 1")
+            data['no_entry_span'] = 1
+        else:
+            return False
     
     return True
 
@@ -259,7 +267,7 @@ def parse_response(full_data, response, code=None, logger=None):
             "rule_top_price": rule_top_price,
             "rule_period": rule_period,
             "risk_reward": risk_reward,
-            "no_entry_span": response_data.get("no_entry_span", 0),
+            "no_entry_span": min(14, max(1, response_data.get("no_entry_span", 0))),  # 1～14の範囲に制限
             "entry_score": entry_score,
             "expected_return": expected_return,
             "reason": reason,
@@ -289,7 +297,7 @@ def extract_json_from_text(text, logger=None):
     
     try:
         # 入力テキストの前処理
-        text = text.strip()  # 前後の空白を除去
+        text = text.strip()
         
         # BOMがある場合は除去
         if text.startswith('\ufeff'):
@@ -313,29 +321,72 @@ def extract_json_from_text(text, logger=None):
         # JSONテキストの正規化
         json_text = json_text.strip()
         
+        # 無効なエスケープシーケンスを修正
+        json_text = re.sub(r'\\([^"\\/bfnrtu])', r'\1', json_text)
+        
+        # 配列内の末尾カンマを削除
+        json_text = re.sub(r',\s*]', ']', json_text)
+        
+        # 文字列内のエスケープされていないダブルクォートをエスケープ（新規追加）
+        # 正規表現で文字列を探し、その中のエスケープされていないダブルクォートをエスケープする
+        def escape_quotes_in_strings(match):
+            # 文字列全体を取得
+            content = match.group(0)
+            # 文字列内のエスケープされていないダブルクォートをエスケープ
+            # ただし、既にエスケープされているものは除外
+            content = re.sub(r'(?<!\\)"(?![:,}\]])', r'\"', content)
+            return content
+        
+        # 文字列を検索してエスケープ処理
+        json_text = re.sub(r':"[^"]*"', escape_quotes_in_strings, json_text)
+        
         # インデントと改行を正規化
         json_text = re.sub(r'[\n\r\t ]+', ' ', json_text)
         
         # 不要なスペースを削除（ただし文字列内のスペースは保持）
-        json_text = re.sub(r'\s*,\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', ',', json_text)  # カンマの前後のスペース
-        json_text = re.sub(r'\s*:\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', ':', json_text)  # コロンの前後のスペース
-        json_text = re.sub(r'\s*\{\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', '{', json_text)  # 波括弧の内側のスペース
-        json_text = re.sub(r'\s*\}\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', '}', json_text)  # 波括弧の内側のスペース
+        json_text = re.sub(r'\s*,\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', ',', json_text)
+        json_text = re.sub(r'\s*:\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', ':', json_text)
+        json_text = re.sub(r'\s*\{\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', '{', json_text)
+        json_text = re.sub(r'\s*\}\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', '}', json_text)
         
-        # プロパティ名をダブルクォートで囲む（すでにクォートされていない場合のみ）
+        # プロパティ名をダブルクォートで囲む
         json_text = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_text)
         
-        # 正規化したJSONをパースしてみる（検証用）
+        # 正規化したJSONをパースしてみる
         try:
             json.loads(json_text)
             log.info("JSONの構文チェックに成功しました")
         except json.JSONDecodeError as e:
             log.error(f"JSONの構文チェックに失敗: {e}")
-            # エラー位置の前後のコンテキストを出力
             error_pos = e.pos
             context_start = max(0, error_pos - 20)
             context_end = min(len(json_text), error_pos + 20)
             log.error(f"エラー位置周辺のテキスト: {json_text[context_start:context_end]}")
+            
+            # エラー修復を試みる
+            try:
+                # 問題のある文字列をより詳細に分析して修正
+                log.info("JSONエラー修復を試みます")
+                if "," in json_text[error_pos-5:error_pos+5]:
+                    # カンマが原因と思われる場合
+                    json_text = json_text[:error_pos] + json_text[error_pos+1:]
+                    log.info("問題のあるカンマを削除しました")
+                
+                # ダブルクォートの問題の場合（新規追加）
+                elif '"' in json_text[error_pos-5:error_pos+5]:
+                    # 問題のある位置の前後10文字を取得してログ出力
+                    problem_area = json_text[max(0, error_pos-10):min(len(json_text), error_pos+10)]
+                    log.info(f"ダブルクォート周辺の問題領域: {problem_area}")
+                    
+                    # 問題の可能性があるエスケープされていないダブルクォートを全てエスケープ
+                    json_text = json_text[:error_pos-10] + re.sub(r'(?<!\\)"', r'\"', json_text[error_pos-10:error_pos+10]) + json_text[error_pos+10:]
+                    log.info("問題のあるダブルクォートをエスケープしました")
+                
+                # 修復したJSONを再度パース
+                json.loads(json_text)
+                log.info("JSON修復に成功しました")
+            except Exception as repair_error:
+                log.error(f"JSON修復に失敗しました: {repair_error}")
             
         return json_text
         
