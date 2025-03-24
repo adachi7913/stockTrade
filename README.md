@@ -2,7 +2,7 @@
 
 ## プロジェクト構造
 
-```
+``` text
 stockTrade/
 ├── bin/              # 実行ファイル（.py）を格納
 │   ├── daily/           # 日次実行系
@@ -25,9 +25,24 @@ stockTrade/
 │   └── purchase_stock_test.bat   # 自動購入機能のテスト実行
 │
 ├── lib/              # ライブラリ
+│   ├── tachibana_stock_api_base.py  # 立花証券API基本機能
+│   ├── jquants_api.py               # jQuants API連携
+│   ├── gemini_api.py                # Gemini API連携
+│   └── edinet_api.py                # EDINET API連携
 ├── service/          # サービス層
+│   ├── stock_service.py             # 株価データ処理サービス
+│   ├── gemini_service.py            # AI判断サービス
+│   ├── entry_service.py             # 売買エントリーサービス
+│   └── browser_service.py           # ブラウザ操作サービス
 ├── utils/            # ユーティリティ
+│   ├── technical_indicators.py      # テクニカル指標計算
+│   ├── stock_utils.py              # 株式関連ユーティリティ
+│   ├── logger.py                   # ログ管理
+│   └── config.py                   # 設定管理
 ├── repository/       # データアクセス層
+│   ├── stock_repository.py         # 株価データリポジトリ
+│   ├── entry_repository.py         # エントリー情報リポジトリ
+│   └── db_connection.py           # データベース接続管理
 ├── log/              # ログファイル
 └── README.md
 ```
@@ -86,21 +101,25 @@ python bin/daily/purchase_stock.py --reset-test --initial-funds 2000000
 ### 自動購入機能のコマンドライン引数
 
 #### 実行モード関連
+
 - `--test`: テストモードを有効化。実際の購入処理をスキップし、シミュレーションのみ実行
 - `--debug`: デバッグモードを有効化。詳細なログを出力
 
 #### テストデータ管理
+
 - `--show-history`: テストモードでの取引履歴を表示
 - `--show-summary`: テストモードでの取引サマリー（損益、勝率など）を表示
-- `--reset-test`: テストデータをリセット。既存のテストデータを全て削除
+- `--reset-test`: テストデータをリセット
 - `--initial-funds <数値>`: テストデータリセット時の初期資金を指定（デフォルト: 1,000,000円）
 
 #### AI判断制御
+
 - `--max-calls <数値>`: AI判断を行う最大銘柄数を指定（デフォルト: 50件）
 - `--min-score <数値>`: エントリー候補とする最低スコアを指定（デフォルト: 70.0）
 - `--api-delay <秒数>`: AI API呼び出し間の待機時間を指定（デフォルト: 30秒）
 
 #### 使用例
+
 ```bash
 # テストモードで実行（購入シミュレーション）
 python bin/daily/purchase_stock.py --test
@@ -119,6 +138,7 @@ python bin/daily/purchase_stock.py --debug
 ```
 
 #### コマンドライン引数
+
 - `--max-calls <数値>`: AI判断の最大件数（デフォルト: 50件）
 - `--min-score <数値>`: エントリースコアの最低値（デフォルト: 70.0）
 - `--api-delay <秒数>`: API呼び出し間の待機時間（デフォルト: 30秒）
@@ -129,15 +149,24 @@ python bin/daily/purchase_stock.py --debug
 - `--initial-funds <数値>`: テストデータリセット時の初期資金（デフォルト: 1,000,000円）
 
 #### 環境変数による制御
+
 1. **必須の環境変数**
    - `GEMINI_API_KEY`: Gemini APIのアクセスキー
    - `GEMINI_PRO_MODEL`: 使用するモデルのバージョン
+   - `DB_HOST`: データベースホスト
+   - `DB_NAME`: データベース名
+   - `DB_USER`: データベースユーザー
+   - `DB_PASSWORD`: データベースパスワード
 
-2. **オプションの環境変数**
+2. **処理制御用環境変数**
    - `STOCK_TEST_MODE`: テストモードの制御（'true'/'false'）
    - `USE_SIMPLIFIED_PROMPT`: 簡略化プロンプトの使用（'true'/'false'）
+   - `STOP_PRICING_FLAG`: 価格取得処理の停止フラグ（'y'/'n'）
+   - `PRICING_PROCESS_DONE`: 価格取得処理の完了フラグ（'y'/'n'）
+   - `INDICATOR_PROCESS_DONE`: インジケーター計算処理の完了フラグ（'y'/'n'）
 
 #### 動作モード
+
 1. **通常モード**
    - 実際の購入処理まで実行
    - ブラウザ操作を含む
@@ -149,6 +178,7 @@ python bin/daily/purchase_stock.py --debug
    - テストフラグ付きでエントリー情報を保存
 
 #### 処理フロー
+
 1. エントリー候補の取得
 2. 基本フィルタリングによる候補の絞り込み
 3. 候補のスコアリングと上位候補の選択
@@ -156,6 +186,7 @@ python bin/daily/purchase_stock.py --debug
 5. 推奨された候補の購入処理実行
 
 #### 注意事項
+
 - テストモードでは実際の購入は行われません
 - API呼び出しには適切な間隔（デフォルト30秒）が必要です
 - エントリースコアが最低値（デフォルト70.0）未満の候補は除外されます
@@ -178,6 +209,7 @@ batch/test/auto_sell_stock_simulation_test.bat
 ## 自動売却機能について
 
 ### 概要
+
 自動売却機能（`auto_sell_stock.py`）は、保有株式の評価と売却判断を自動化するツールです。以下の特徴があります：
 
 - AIによる総合的な評価（Gemini API使用）
@@ -186,6 +218,7 @@ batch/test/auto_sell_stock_simulation_test.bat
 - 対話的な売却確認機能
 
 ### 評価基準
+
 1. **AIによる総合評価**
    - トレンド分析（一目均衡表、MACD）
    - モメンタム（RSI、ストキャスティクス）
@@ -203,11 +236,13 @@ batch/test/auto_sell_stock_simulation_test.bat
    - 利益 10%以上: 利益確定売却シグナル
 
 ### 出力情報
+
 - 保有銘柄の評価サマリー
 - 売却候補一覧
 - 売却実行結果
 
 ### 自動売却機能の注意事項
+
 - 売却判断は確信度（confidence_score）が500以上の場合のみ有効
 - テストモードでは実際の売却は行われません
 - 強制売却モードは慎重に使用してください
@@ -217,6 +252,7 @@ batch/test/auto_sell_stock_simulation_test.bat
 ## 全般的な注意事項
 
 ### 環境設定
+
 - 実行前に必要な環境変数が設定されていることを確認してください
 - 以下の環境変数が必要です：
   - `PYTHON_PATH`: Python実行ファイルのパス
@@ -224,21 +260,39 @@ batch/test/auto_sell_stock_simulation_test.bat
   - その他必要な認証情報
 
 ### ログ管理
+
 - ログファイルは`log/YYYY/MM/DD/`ディレクトリに出力されます
 - エラーが発生した場合は、ログファイルを確認してください
 - ログファイルは自動的に30日間保持されます
 
 ### データベース
+
 - 株価データは日次で更新されます
 - データベースのバックアップは自動的に実行されます
 - エラー発生時はデータベースの整合性を確認してください
 
+### データベース接続管理
+
+- コネクションプールを使用して効率的なデータベース接続を管理
+- 最小2接続、最大10接続
+- 接続タイムアウト: 30秒
+- 待機キュー最大サイズ: 20
+
+### バッチ処理の最適化
+
+- 株価データ取得の並列処理
+- データ検証機能の強化
+- エラーハンドリングとリトライ機能
+- 処理の中断と再開機能
+
 ## EntryRepositoryについて
 
-### 概要
+### EntryRepositoryの概要
+
 EntryRepositoryは、資金管理と取引履歴管理を行うためのリポジトリクラスです。以下の機能を提供します：
 
 ### 主な機能
+
 1. **資金管理**
    - `get_available_funds(test_mode=False)`: 利用可能な資金を取得
    - `reset_test_data(initial_funds=1000000.0)`: テストデータをリセット
@@ -253,6 +307,7 @@ EntryRepositoryは、資金管理と取引履歴管理を行うためのリポ�
    - `update_exit_info(...)`: 売却情報を更新
 
 ### テストの実行方法
+
 ```bash
 # EntryRepositoryのテストを実行
 python bin/test/test_entry_repository.py
@@ -262,10 +317,11 @@ python -m unittest bin.test.test_entry_repository.TestEntryRepository.test_get_a
 ```
 
 ### テストケース
+
 1. `test_get_available_funds`: 資金取得機能のテスト
 2. `test_get_test_trade_history`: 取引履歴取得機能のテスト
 3. `test_get_test_summary`: サマリー情報取得機能のテスト
-4. `test_reset_test_data`: データリセット機能のテスト 
+4. `test_reset_test_data`: データリセット機能のテスト
 
 ### auto_sell_stock.py の動作仕様
 
@@ -283,4 +339,77 @@ python -m unittest bin.test.test_entry_repository.TestEntryRepository.test_get_a
 3. **売却判断基準**
    - 損益率による判断（-5%以下で売却、+10%以上で利確）
    - テクニカル指標（RSI、MACD）による判断
-   - AI評価による総合判断 
+   - AI評価による総合判断
+
+## テスト実行について
+
+### テストファイル一覧
+
+#### バッチファイル (batch/test/)
+- `purchase_stock_test.bat`: 自動購入機能のテスト実行
+- `auto_sell_stock_simulation_test.bat`: 自動売却機能のシミュレーション
+- `run_tachibana_test.bat`: 立花証券API接続テスト
+
+#### Pythonテストファイル (bin/test/)
+- `test_tachibana_api.py`: 立花証券APIのテスト
+- `test_entry_repository.py`: エントリー情報管理のテスト
+- `test_performance.py`: パフォーマンステスト
+- `test_purchase_stock.py`: 自動購入機能のテスト
+- `test_indicator.py`: テクニカル指標計算のテスト
+- `test_report_dir.py`: レポート出力機能のテスト
+- `wrapper_script.py`: テスト用ラッパースクリプト
+- `fix_script.py`: データ修正用スクリプト
+
+### テストの実行方法
+
+#### 自動購入機能のテスト
+```batch
+# バッチファイルで実行
+batch/test/purchase_stock_test.bat
+
+# 直接実行
+python bin/test/test_purchase_stock.py
+```
+
+#### 自動売却機能のシミュレーション
+```batch
+# バッチファイルで実行
+batch/test/auto_sell_stock_simulation_test.bat
+```
+
+#### 立花証券APIテスト
+```batch
+# バッチファイルで実行
+batch/test/run_tachibana_test.bat
+
+# 直接実行
+python bin/test/test_tachibana_api.py
+```
+
+#### テクニカル指標のテスト
+```batch
+python bin/test/test_indicator.py
+```
+
+#### パフォーマンステスト
+```batch
+python bin/test/test_performance.py
+```
+
+### テスト実行時の注意事項
+
+1. **環境設定**
+   - テスト実行前に必要な環境変数が設定されていることを確認
+   - テストデータベースが適切に設定されていることを確認
+
+2. **テストモード**
+   - テストでは実際の取引は行われません
+   - テストデータは独立したテーブルで管理されます
+
+3. **パフォーマンステスト**
+   - 大量のデータを扱うため、十分なメモリを確保してください
+   - テスト実行時間が長くなる可能性があります
+
+4. **データクリーンアップ**
+   - テスト終了後、テストデータは自動的にクリーンアップされます
+   - 手動でクリーンアップする場合は`test_purchase_stock.py --reset-test`を使用
