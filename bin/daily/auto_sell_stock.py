@@ -538,6 +538,34 @@ def main():
             # 3. 評価結果をデータベースに保存
             auto_sell.stock_repository.save_holding_evaluation(evaluation, is_test=args.test)
             
+            # 3.5. entriesテーブルのストップロスと目標価格も更新
+            entry_update = {'code': code}
+            
+            # ストップロスが有効な値なら更新対象に追加
+            if evaluation.stop_loss != "NG":
+                entry_update['stop_loss'] = evaluation.stop_loss
+            
+            # 目標価格が有効な値なら更新対象に追加
+            if evaluation.target_price != "NG":
+                entry_update['target_price'] = evaluation.target_price
+            
+            # is_testパラメータは必須（WHERE句の条件に使用）
+            entry_update['is_test'] = args.test
+            
+            # 更新すべき項目がある場合のみ更新実行
+            if len(entry_update) > 2:  # codeとis_testを除く他の項目がある場合
+                update_success = auto_sell.stock_repository.update_entry(entry_update)
+                if update_success:
+                    update_items = []
+                    if 'stop_loss' in entry_update:
+                        update_items.append(f"ストップロス={evaluation.stop_loss}")
+                    if 'target_price' in entry_update:
+                        update_items.append(f"目標価格={evaluation.target_price}")
+                    
+                    logger.info(f"entriesテーブルの価格情報を更新しました: {', '.join(update_items)}")
+                else:
+                    logger.error(f"entriesテーブルの価格情報更新に失敗しました")
+            
             # 4. 評価結果のサマリーを表示
             logger.info(f"\n証券コード: {code}")
             logger.info(f"判断: {evaluation.decision}")

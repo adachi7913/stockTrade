@@ -117,6 +117,7 @@ python bin/daily/purchase_stock.py --reset-test --initial-funds 2000000
 - `--max-calls <数値>`: AI判断を行う最大銘柄数を指定（デフォルト: 50件）
 - `--min-score <数値>`: エントリー候補とする最低スコアを指定（デフォルト: 70.0）
 - `--api-delay <秒数>`: AI API呼び出し間の待機時間を指定（デフォルト: 30秒）
+- `--allow-position-increase`: 保有銘柄の買い増しを許可する
 
 #### 使用例
 
@@ -126,6 +127,12 @@ python bin/daily/purchase_stock.py --test
 
 # テストモードで実行（AI判断10件、最低スコア80）
 python bin/daily/purchase_stock.py --test --max-calls 10 --min-score 80
+
+# 保有銘柄の買い増しも許可して実行
+python bin/daily/purchase_stock.py --allow-position-increase
+
+# テストモードで買い増し許可
+python bin/daily/purchase_stock.py --test --allow-position-increase
 
 # テストデータをリセットして初期資金200万円で開始
 python bin/daily/purchase_stock.py --reset-test --initial-funds 2000000
@@ -142,6 +149,7 @@ python bin/daily/purchase_stock.py --debug
 - `--max-calls <数値>`: AI判断の最大件数（デフォルト: 50件）
 - `--min-score <数値>`: エントリースコアの最低値（デフォルト: 70.0）
 - `--api-delay <秒数>`: API呼び出し間の待機時間（デフォルト: 30秒）
+- `--allow-position-increase`: 保有銘柄の買い増しを許可する
 - `--test`: テストモードの有効化（実際の購入処理をスキップ）
 - `--show-history`: テストモードの取引履歴を表示
 - `--show-summary`: テストモードのサマリーを表示
@@ -164,6 +172,7 @@ python bin/daily/purchase_stock.py --debug
    - `STOP_PRICING_FLAG`: 価格取得処理の停止フラグ（'y'/'n'）
    - `PRICING_PROCESS_DONE`: 価格取得処理の完了フラグ（'y'/'n'）
    - `INDICATOR_PROCESS_DONE`: インジケーター計算処理の完了フラグ（'y'/'n'）
+   - `ALLOW_POSITION_INCREASE`: 保有銘柄の買い増しを許可（'true'/'false'、デフォルト: 'false'）
 
 #### 動作モード
 
@@ -177,13 +186,45 @@ python bin/daily/purchase_stock.py --debug
    - ブラウザ操作なし
    - テストフラグ付きでエントリー情報を保存
 
+3. **買い増しモード**
+   - 保有中の銘柄も候補に含めて評価・購入
+   - `--allow-position-increase`オプションまたは環境変数`ALLOW_POSITION_INCREASE=true`で有効化
+   - デフォルトは無効（保有銘柄は候補から除外）
+
 #### 処理フロー
 
 1. エントリー候補の取得
+   - 買い増しモード無効: 保有銘柄を除外
+   - 買い増しモード有効: 保有銘柄も候補に含める
 2. 基本フィルタリングによる候補の絞り込み
 3. 候補のスコアリングと上位候補の選択
 4. AIによるエントリー判断
 5. 推奨された候補の購入処理実行
+
+#### 使用例
+
+```bash
+# テストモードで実行（購入シミュレーション）
+python bin/daily/purchase_stock.py --test
+
+# テストモードで実行（AI判断10件、最低スコア80）
+python bin/daily/purchase_stock.py --test --max-calls 10 --min-score 80
+
+# 保有銘柄の買い増しも許可して実行
+python bin/daily/purchase_stock.py --allow-position-increase
+
+# テストモードで買い増し許可
+python bin/daily/purchase_stock.py --test --allow-position-increase
+
+# テストデータをリセットして初期資金200万円で開始
+python bin/daily/purchase_stock.py --reset-test --initial-funds 2000000
+
+# テストモードの取引履歴を確認
+python bin/daily/purchase_stock.py --show-history
+
+# デバッグモードで本番実行
+python bin/daily/purchase_stock.py --debug
+```
 
 #### 注意事項
 
