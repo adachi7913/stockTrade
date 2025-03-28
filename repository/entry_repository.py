@@ -107,6 +107,7 @@ class EntryRepository(BaseRepository):
             bool: 保存成功でTrue
         """
         try:
+            # entriesテーブルにデータを挿入
             query = """
             INSERT INTO entries (
                 code, entry_date, entry_price, stop_loss,
@@ -124,9 +125,48 @@ class EntryRepository(BaseRepository):
             # is_testのデフォルト値を設定
             if 'is_test' not in entry_data:
                 entry_data['is_test'] = False
+            
+            # 現在の利用可能資金を取得
+            current_funds = self.get_available_funds(test_mode=entry_data.get('is_test', False))
+            
+            # 購入コストを計算
+            try:
+                purchase_cost = float(entry_data['entry_price']) * float(entry_data['quantity'])
+            except (ValueError, TypeError, KeyError) as e:
+                self.logger.error(f"購入コスト計算エラー: {e} - entry_price: {entry_data.get('entry_price')}, quantity: {entry_data.get('quantity')}")
+                return False
                 
-            self.cur.execute(query, entry_data)
-            self.conn.commit()
+            # 新しい残高を計算
+            new_available_funds = current_funds - purchase_cost
+            
+            # trade_resultsテーブルに購入記録を追加（資金残高の更新）
+            trade_query = """
+            INSERT INTO trade_results (
+                trade_type, symbol_code, entry_datetime, entry_price,
+                quantity, available_funds, is_test
+            ) VALUES (
+                'entry', %(code)s, CURRENT_TIMESTAMP, %(entry_price)s,
+                %(quantity)s, %(new_available_funds)s, %(is_test)s
+            );
+            """
+            
+            trade_data = {
+                **entry_data,
+                'new_available_funds': new_available_funds
+            }
+            
+            # トランザクション開始（明示的に）
+            with self.conn:
+                # entriesテーブルへのインサート
+                self.cur.execute(query, entry_data)
+                
+                # trade_resultsテーブルへのインサート
+                self.cur.execute(trade_query, trade_data)
+                
+                # トランザクションをコミット
+                self.conn.commit()
+                
+            self.logger.info(f"エントリー情報を保存しました: {entry_data['code']} - 購入金額: {purchase_cost:,.0f}円, 残高: {new_available_funds:,.0f}円")
             return True
             
         except Exception as e:
@@ -826,3 +866,127 @@ class EntryRepository(BaseRepository):
             self.logger.error(f"テストトレード結果保存エラー: {e}")
             self.conn.rollback()
             return False 
+
+    def fetch_entry_candidates_with_holdings(self, min_score: int = 700, limit: int = 400) -> List[Dict]:
+        """
+        エントリースコアが指定値以上のデータを一日辺りの期待リターンの降順で取得します
+        保有中の銘柄も含めて取得します（買い増し許可モード）
+        
+        Args:
+            min_score (int): 最小エントリースコア（デフォルト: 700）
+            limit (int): 取得する最大件数（デフォルト: 400）
+            
+        Returns:
+            List[Dict]: エントリー候補のリスト
+        """
+        try:
+            # 環境変数 MIN_ENTRY_SCORE が設定されている場合、その値を使用（int変換）
+            env_min_score = os.getenv("MIN_ENTRY_SCORE")
+            if env_min_score is not None:
+                try:
+                    min_score = int(env_min_score)
+                except ValueError:
+                    self.logger.error(f"環境変数MIN_ENTRY_SCOREの値が数値に変換できません: {env_min_score}. デフォルト値650を使用します。")
+                    min_score = 650
+
+            # 環境変数 ENTRY_CANDIDATE_LIMIT が設定されている場合、その値を使用（int変換）
+            env_limit = os.getenv("ENTRY_CANDIDATE_LIMIT")
+            self.logger.info(f"ENTRY_CANDIDATE_LIMIT: {env_limit}")
+            if env_limit is not None:
+                try:
+                    limit = int(env_limit)
+                except ValueError:
+                    self.logger.error(f"環境変数ENTRY_CANDIDATE_LIMITの値が数値に変換できません: {env_limit}. デフォルト値10を使用します。")
+                    limit = 10
+
+            # 既存のSQLから保有銘柄除外の条件を削除したクエリ
+            query = """
+            SELECT 
+                a.code, a.date, a.close, a.rule_entry_price, a.rule_stop_limit,
+                a.rule_top_price, a.rule_period, a.risk_reward, a.entry_score,
+                a.expected_return, a.reason, a.entry_conditions, a.exit_conditions,
+                a.short_term_trend, a.mid_term_trend, a.long_term_trend,
+                a.support_resistance, a.technical_patterns, a.indicator_analysis,
+                a.no_entry_span,
+                CASE WHEN e.code IS NOT NULL THEN TRUE ELSE FALSE END AS is_holding
+            FROM api_response a
+            LEFT JOIN entries e ON a.code = e.code AND e.status = 'active'
+            WHERE a.entry_score >= %s
+            ORDER BY CASE 
+                WHEN a.rule_period ~ E'^\\d+$' AND CAST(a.rule_period AS INTEGER) > 0 
+                THEN CAST(a.expected_return AS NUMERIC) / CAST(a.rule_period AS INTEGER) 
+                ELSE 0 
+            END DESC
+            LIMIT %s;
+            """
+            
+            self.cur.execute(query, (min_score, limit))
+            rows = self.cur.fetchall()
+            
+            return [{
+                'code': row[0],
+                'date': row[1],
+                'close': row[2],
+                'entry_price': row[3],
+                'stop_loss': row[4],
+                'target_price': row[5],
+                'period': row[6],
+                'risk_reward': row[7],
+                'entry_score': row[8],
+                'expected_return': row[9],
+                'reason': row[10],
+                'entry_conditions': row[11],
+                'exit_conditions': row[12],
+                'market_analysis': {
+                    'short_term_trend': row[13],
+                    'mid_term_trend': row[14],
+                    'long_term_trend': row[15],
+                    'support_resistance': row[16]
+                },
+                'technical_patterns': row[17],
+                'indicator_analysis': row[18],
+                'no_entry_span': row[19],
+                'is_holding': row[20] if len(row) > 20 else False
+            } for row in rows]
+
+        except Exception as e:
+            self.logger.error(f"エントリー候補取得エラー（保有銘柄含む）: {e}")
+            return []
+
+    def get_current_holdings(self, is_test: bool = False) -> List[Dict]:
+        """
+        現在保有中の銘柄情報を取得します
+        
+        Args:
+            is_test (bool): テストモードかどうか
+            
+        Returns:
+            List[Dict]: 保有銘柄情報のリスト
+        """
+        try:
+            query = """
+            SELECT 
+                code, entry_date, entry_price, stop_loss, target_price,
+                holding_period, risk_reward, quantity, status
+            FROM entries
+            WHERE status = 'active' AND is_test = %s
+            """
+            
+            self.cur.execute(query, (is_test,))
+            rows = self.cur.fetchall()
+            
+            return [{
+                'code': row[0],
+                'entry_date': row[1],
+                'entry_price': row[2],
+                'stop_loss': row[3],
+                'target_price': row[4],
+                'holding_period': row[5],
+                'risk_reward': row[6], 
+                'quantity': row[7],
+                'status': row[8]
+            } for row in rows]
+            
+        except Exception as e:
+            self.logger.error(f"保有銘柄情報取得エラー: {e}")
+            return [] 

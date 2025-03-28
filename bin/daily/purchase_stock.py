@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import time
 
 from repository.entry_repository import EntryRepository
+from repository.fund_manager import FundManager
 from Gemini.entry_judgment_handler import EntryJudgmentHandler
 from browser_use.entry_browser_use import EntryBrowserUse
 from repository.stock_repository import StockRepository
@@ -46,7 +47,7 @@ class StockPurchaseManager:
     このクラスは同期処理を使用して、データ取得と処理を実現します。
     """
     
-    def __init__(self, max_ai_calls=40, min_entry_score=70.0, api_delay=30, test_mode=False):
+    def __init__(self, max_ai_calls=40, min_entry_score=70.0, api_delay=30, test_mode=False, allow_position_increase=False):
         """
         初期化処理
         
@@ -61,6 +62,7 @@ class StockPurchaseManager:
             min_entry_score (float): エントリースコアの最低値（これ以下の候補はAI判断を行わない）
             api_delay (int): AI API呼び出し間の待機時間（秒）
             test_mode (bool): テストモードを有効にするかどうか
+            allow_position_increase (bool): 保有銘柄の買い増しを許可するかどうか
         """
         load_dotenv()
         self.entry_repository = EntryRepository()
@@ -78,7 +80,10 @@ class StockPurchaseManager:
         self.max_ai_calls = max_ai_calls
         self.min_entry_score = min_entry_score
         self.api_delay = api_delay
-        
+        # 買い増し設定
+        self.allow_position_increase = allow_position_increase or os.getenv('ALLOW_POSITION_INCREASE', 'false').lower() == 'true'
+        if self.allow_position_increase:
+            self.logger.info("買い増しモードが有効です。保有中の銘柄も候補に含めます。")
         
         if self.test_mode:
             self.logger.info("テストモードが有効です。実際の購入処理はスキップされます。")
@@ -90,6 +95,9 @@ class StockPurchaseManager:
         
         # プロンプト生成器を初期化
         self.prompt_generator = PromptGenerator()
+        
+        # 資金管理クラスの初期化（利用時に実際の値で初期化）
+        self.fund_manager = None
 
     def _get_entry_candidate(self) -> List[Dict]:
         """
@@ -110,7 +118,14 @@ class StockPurchaseManager:
         # 環境変数を再読み込み
         load_dotenv(override=True)
         
-        candidates = self.entry_repository.fetch_best_entry_candidates()
+        # 買い増し許可モードかどうかで異なるSQLクエリを実行
+        if self.allow_position_increase:
+            candidates = self.entry_repository.fetch_entry_candidates_with_holdings()
+            self.logger.info("買い増しモード有効: 保有中の銘柄も候補に含めます")
+        else:
+            candidates = self.entry_repository.fetch_best_entry_candidates()
+            self.logger.info("買い増しモード無効: 保有中の銘柄は候補から除外します")
+            
         if not candidates:
             self.logger.info("エントリー候補が見つかりませんでした")
             return []
@@ -470,9 +485,10 @@ class StockPurchaseManager:
             bool: 購入成功で True、すべて失敗または候補がない場合は False
         """
         try:
-            # 1. 買付余力を取得
+            # 1. 買付余力を取得し、資金管理クラスを初期化
             self.logger.info("買付余力の確認")
             available_funds = self.entry_repository.get_available_funds(test_mode=self.test_mode)
+            self.fund_manager = FundManager(available_funds, logger=self.logger)
             
             if available_funds <= 0:
                 self.logger.warning("買付余力がありません")
@@ -528,7 +544,7 @@ class StockPurchaseManager:
                         backtest_results=backtest_results,
                         technical_data=historical_data,
                         entry_score=entry_score,
-                        available_funds=available_funds,  # 買付余力を渡す
+                        available_funds=self.fund_manager.get_available_funds(),  # 最新の利用可能資金を使用
                         api_response_data=candidate
                     )
                 
@@ -657,30 +673,54 @@ class StockPurchaseManager:
                     self.logger.error("購入株数が指定されていません")
                     continue
 
+                # 購入金額の計算と資金チェック
+                purchase_cost = candidate['entry_price'] * candidate['quantity']
+                if not self.fund_manager.can_purchase(purchase_cost):
+                    self.logger.warning(f"候補 {stock_code}: 利用可能資金不足のためスキップ（必要額: {purchase_cost:,.0f}円、残額: {self.fund_manager.get_available_funds():,.0f}円）")
+                    continue
+
+                # 資金の予約
+                if not self.fund_manager.reserve_funds(stock_code, purchase_cost):
+                    self.logger.error(f"候補 {stock_code}: 資金予約に失敗")
+                    continue
+
                 # 5. 推奨された候補についてエントリーを実行
                 if self.test_mode:
                     self.logger.info(f"テストモード: 候補 {stock_code} の実際の購入処理をスキップします")
                     candidate['is_test'] = True
-                    self.entry_repository.save_entry_info(candidate)
-                    any_success = True
+                    if self.entry_repository.save_entry_info(candidate):
+                        any_success = True
+                    else:
+                        # エントリー保存失敗の場合は資金予約を解除
+                        self.fund_manager.release_reservation(stock_code)
                 else:
                     # ブラウザ操作クラスが初期化されていない場合はエラーを出力
                     if self.browser_handler is None:
                         self.logger.error(f"ブラウザ操作クラスが初期化されていません。候補 {stock_code} のエントリーをスキップします。")
+                        self.fund_manager.release_reservation(stock_code)
                         continue
                         
                     success = self.browser_handler.execute_entry(candidate)
                     if success:
-                        self.entry_repository.save_entry_info(candidate)
-                        self.logger.info(f"エントリー成功: {stock_code}")
-                        any_success = True
+                        if self.entry_repository.save_entry_info(candidate):
+                            self.logger.info(f"エントリー成功: {stock_code}")
+                            any_success = True
+                        else:
+                            # エントリー保存失敗の場合は資金予約を解除
+                            self.fund_manager.release_reservation(stock_code)
+                            self.logger.error(f"エントリー保存失敗: {stock_code}")
                     else:
+                        # 購入失敗の場合は資金予約を解除
+                        self.fund_manager.release_reservation(stock_code)
                         self.logger.error(f"エントリー失敗: {stock_code}")
 
             return any_success
 
         except Exception as e:
             self.logger.error(f"購入処理中にエラーが発生: {e}", exc_info=True)
+            # 例外発生時は念のためすべての資金予約を解除
+            if self.fund_manager:
+                self.fund_manager.clear_pending_purchases()
             return False
 
 
@@ -698,6 +738,7 @@ def main():
         --max-calls: AI判断の最大件数（デフォルト: 50件）
         --min-score: エントリースコアの最低値（デフォルト: 70.0）
         --api-delay: API呼び出し間の待機時間（デフォルト: 30秒）
+        --allow-position-increase: 保有銘柄の買い増しを許可する
     """
     import argparse
     
@@ -710,6 +751,7 @@ def main():
     parser.add_argument('--max-calls', type=int, default=50, help='AI判断の最大件数')
     parser.add_argument('--min-score', type=float, default=70.0, help='エントリースコアの最低値')
     parser.add_argument('--api-delay', type=int, default=30, help='API呼び出し間の待機時間（秒）')
+    parser.add_argument('--allow-position-increase', action='store_true', help='保有銘柄の買い増しを許可する')
     
     args = parser.parse_args()
     
@@ -765,7 +807,8 @@ def main():
         test_mode=args.test,
         max_ai_calls=args.max_calls,
         min_entry_score=args.min_score,
-        api_delay=args.api_delay
+        api_delay=args.api_delay,
+        allow_position_increase=args.allow_position_increase
     )
     success = manager.execute_purchase()
     
