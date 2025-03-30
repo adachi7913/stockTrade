@@ -401,7 +401,7 @@ class AutoSellStock:
                 'close_price': current_price,
                 'quantity': quantity,
                 'profit_loss': profit_loss,
-                'available_funds': self.calculate_available_funds(profit_loss, fee),  # テスト用資金を計算
+                'available_funds': self.calculate_available_funds(profit_loss, fee, transaction_amount),
                 'fee': fee,
                 'order_type': 'market',
                 'position': 'long',
@@ -434,13 +434,14 @@ class AutoSellStock:
         except Exception as e:
             self.logger.error(f"テスト売却処理中にエラーが発生: {e}")
 
-    def calculate_available_funds(self, profit_loss: float, fee: float) -> int:
+    def calculate_available_funds(self, profit_loss: float, fee: float, transaction_amount: float) -> int:
         """
         テストモードでの利用可能資金を計算
         
         Args:
             profit_loss (float): 売却による損益
             fee (float): 取引手数料
+            transaction_amount (float): 売却総額（現在価格×数量）
             
         Returns:
             int: 更新後の利用可能資金
@@ -454,9 +455,10 @@ class AutoSellStock:
                 current_funds = 1000000  # 初期資金100万円（設定に応じて変更）
                 self.logger.info(f"テスト用初期資金を設定: {current_funds}円")
             
-            # 売却後の資金を計算（損益 - 手数料）
-            updated_funds = int(current_funds + profit_loss - fee)
-            self.logger.info(f"テスト用資金更新: {current_funds}円 → {updated_funds}円 (損益: {profit_loss}円, 手数料: {fee}円)")
+            # 売却後の資金を計算（現在の資金 + 売却総額 - 手数料）
+            updated_funds = int(current_funds + transaction_amount - fee)
+            self.logger.info(f"テスト用資金更新: {current_funds}円 → {updated_funds}円 (売却総額: {transaction_amount}円, 手数料: {fee}円)")
+            self.logger.info(f"損益情報: {profit_loss}円") # 参考情報としてログに残す
             
             return updated_funds
             
