@@ -473,3 +473,75 @@ python bin/test/test_performance.py
    - 資金残高の管理も担当
 
 これらのテーブルを参照することで、株式の購入から売却までの一連の流れを追跡することができます。
+
+### テストトレード分析機能
+
+テストモードでの取引パフォーマンスを分析・レポート生成する機能です。
+
+#### 基本的な使用方法
+
+```bash
+# 全期間のパフォーマンス分析
+python bin/test/analyze_test_performance.py
+
+# 期間を指定して分析
+python bin/test/analyze_test_performance.py --start-date 2024-01-01 --end-date 2024-03-31
+
+# リセット履歴の表示
+python bin/test/analyze_test_performance.py --reset-history
+
+# JSON形式で出力
+python bin/test/analyze_test_performance.py --json
+
+# 分析結果をファイルに保存
+python bin/test/analyze_test_performance.py --save analysis_result.json
+```
+
+#### コマンドライン引数
+
+- `--start-date`: 分析開始日（YYYY-MM-DD形式）
+- `--end-date`: 分析終了日（YYYY-MM-DD形式）
+- `--reset-history`: テストモードのリセット履歴を表示
+- `--json`: 結果をJSON形式で出力
+- `--save`: 分析結果をJSONファイルとして保存
+
+#### 分析レポートの内容
+
+1. **サマリー情報**
+   - 総取引数
+   - 勝率
+   - 平均利益/損失
+   - 最大利益/損失
+   - 総利益
+   - 平均保有日数
+
+2. **月次パフォーマンス**
+   - 月ごとの取引数
+   - 月間総利益
+   - 月間平均利益率
+
+3. **業種別パフォーマンス**
+   - 業種ごとの取引数
+   - 平均利益率
+   - 総利益
+
+4. **保有期間別パフォーマンス**
+   - 期間区分（5日以内、6-10日、11-20日、21日以上）
+   - 区分ごとの取引数
+   - 平均利益率
+   - 総利益
+
+#### データ保持機能
+
+テストモードのリセット時に、以下のデータを履歴として保持：
+
+1. **エントリー履歴**
+   - `entries_history`テーブルに保存
+   - 取引詳細（エントリー価格、決済価格、損益など）
+
+2. **取引結果履歴**
+   - `trade_results_history`テーブルに保存
+   - 資金状況の推移
+   - リセットポイントの記録
+
+これにより、過去のテスト結果を分析可能で、トレード戦略の改善に活用できます。

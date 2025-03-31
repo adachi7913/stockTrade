@@ -784,6 +784,7 @@ class EntryRepository(BaseRepository):
     def reset_test_data(self, initial_funds: float = 1000000.0) -> bool:
         """
         テストデータをリセットし、初期資金を設定
+        既存のテストデータは履歴として保持
         
         Args:
             initial_funds (float): 初期資金（デフォルト: 1,000,000円）
@@ -794,15 +795,86 @@ class EntryRepository(BaseRepository):
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
-                    # テストデータの削除
+                    # 1. アクティブなエントリーを履歴に保存してからクローズ
                     cur.execute("""
-                        DELETE FROM entries WHERE is_test = true;
-                        DELETE FROM ai_entry_judgments WHERE is_test = true;
-                        DELETE FROM trade_results WHERE is_test = true;
+                        -- 1.1 現在のエントリーを履歴に保存
+                        INSERT INTO entries_history (
+                            trade_id, code, entry_date, entry_price, stop_loss,
+                            target_price, reason, holding_period, risk_reward,
+                            quantity, status, exit_date, exit_price, profit,
+                            profit_rate, exit_reason, created_at, updated_at, is_test
+                        )
+                        SELECT 
+                            trade_id, code, entry_date, entry_price, stop_loss,
+                            target_price, reason, holding_period, risk_reward,
+                            quantity, status, exit_date, exit_price, profit,
+                            profit_rate, exit_reason, created_at, updated_at, is_test
+                        FROM entries
+                        WHERE is_test = true;
+
+                        -- 1.2 アクティブなエントリーをクローズ
+                        UPDATE entries 
+                        SET status = 'closed',
+                            exit_date = CURRENT_DATE,
+                            exit_price = (
+                                SELECT close 
+                                FROM stock_prices sp
+                                WHERE sp.code = entries.code 
+                                AND sp.date = CURRENT_DATE
+                            ),
+                            profit = CASE 
+                                WHEN quantity > 0 THEN 
+                                    quantity * ((
+                                        SELECT close 
+                                        FROM stock_prices sp
+                                        WHERE sp.code = entries.code 
+                                        AND sp.date = CURRENT_DATE
+                                    ) - entry_price)
+                                ELSE 0
+                            END,
+                            profit_rate = CASE 
+                                WHEN entry_price > 0 THEN 
+                                    ((
+                                        SELECT close 
+                                        FROM stock_prices sp
+                                        WHERE sp.code = entries.code 
+                                        AND sp.date = CURRENT_DATE
+                                    ) - entry_price) / entry_price * 100
+                                ELSE 0
+                            END,
+                            exit_reason = 'System Reset',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE is_test = true AND status = 'active'
+                        RETURNING code, exit_price, profit, profit_rate;
                     """)
                     
-                    # 初期資金の設定
+                    # 2. trade_resultsの処理
                     cur.execute("""
+                        -- 2.1 現在のtrade_resultsを履歴に保存
+                        INSERT INTO trade_results_history (
+                            trade_id, created_at, updated_at, trade_type,
+                            symbol_code, entry_datetime, close_datetime,
+                            entry_price, close_price, quantity, profit_loss,
+                            available_funds, fee, order_type, position,
+                            strategy_id, note, is_test
+                        )
+                        SELECT 
+                            trade_id, created_at, updated_at, trade_type,
+                            symbol_code, entry_datetime, close_datetime,
+                            entry_price, close_price, quantity, profit_loss,
+                            available_funds, fee, order_type, position,
+                            strategy_id, note, is_test
+                        FROM trade_results
+                        WHERE is_test = true;
+
+                        -- 2.2 既存のテスト取引をクローズ
+                        UPDATE trade_results
+                        SET trade_type = 'close',
+                            close_datetime = CURRENT_TIMESTAMP,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE is_test = true AND trade_type = 'entry';
+
+                        -- 2.3 新しい初期状態の作成
                         INSERT INTO trade_results (
                             trade_type,
                             symbol_code,
@@ -811,16 +883,20 @@ class EntryRepository(BaseRepository):
                             profit_loss,
                             available_funds,
                             is_test,
-                            position
+                            position,
+                            created_at,
+                            updated_at
                         ) VALUES (
-                            'entry',  -- trade_typeはentryかcloseのみ許可
-                            '0000',   -- symbol_codeは必須
-                            0,        -- entry_priceは任意
-                            0,        -- quantityは必須
-                            0,        -- profit_lossは必須
-                            %s,       -- available_fundsは必須
-                            true,     -- is_testはテストデータ
-                            'long'    -- positionはlongかshort
+                            'entry',
+                            '0000',
+                            0,
+                            0,
+                            0,
+                            %s,
+                            true,
+                            'long',
+                            CURRENT_TIMESTAMP,
+                            CURRENT_TIMESTAMP
                         )
                     """, (initial_funds,))
                     
@@ -829,7 +905,7 @@ class EntryRepository(BaseRepository):
                 
         except Exception as e:
             self.logger.error(f"テストデータのリセットに失敗: {e}")
-            return False 
+            return False
 
     def save_test_trade_result(self, trade_data: Dict) -> bool:
         """
@@ -990,3 +1066,248 @@ class EntryRepository(BaseRepository):
         except Exception as e:
             self.logger.error(f"保有銘柄情報取得エラー: {e}")
             return [] 
+
+    def analyze_test_trading_history(self, start_date: Optional[date] = None, end_date: Optional[date] = None) -> Dict:
+        """
+        テストトレードの履歴を分析し、パフォーマンスメトリクスを計算
+        
+        Args:
+            start_date (date, optional): 分析開始日
+            end_date (date, optional): 分析終了日
+            
+        Returns:
+            Dict: 分析結果
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        WITH closed_trades AS (
+                            SELECT 
+                                h.code,
+                                h.entry_date,
+                                h.exit_date,
+                                h.entry_price,
+                                h.exit_price,
+                                h.quantity,
+                                h.profit,
+                                h.profit_rate,
+                                h.exit_reason,
+                                h.archived_at
+                            FROM entries_history h
+                            WHERE h.is_test = true
+                            AND h.status = 'closed'
+                            AND (h.entry_date >= %s OR %s IS NULL)
+                            AND (h.exit_date <= %s OR %s IS NULL)
+                        )
+                        SELECT 
+                            COUNT(*) as total_trades,
+                            COUNT(CASE WHEN profit > 0 THEN 1 END) as winning_trades,
+                            COUNT(CASE WHEN profit <= 0 THEN 1 END) as losing_trades,
+                            ROUND(AVG(profit)::numeric, 2) as avg_profit,
+                            ROUND(AVG(profit_rate)::numeric, 2) as avg_profit_rate,
+                            ROUND(MAX(profit)::numeric, 2) as max_profit,
+                            ROUND(MIN(profit)::numeric, 2) as max_loss,
+                            ROUND(SUM(profit)::numeric, 2) as total_profit,
+                            ROUND(AVG(CASE WHEN profit > 0 THEN profit END)::numeric, 2) as avg_win,
+                            ROUND(AVG(CASE WHEN profit < 0 THEN profit END)::numeric, 2) as avg_loss,
+                            ROUND(AVG(EXTRACT(DAY FROM (exit_date - entry_date)))::numeric, 2) as avg_holding_days,
+                            json_agg(DISTINCT exit_reason) as exit_reasons
+                        FROM closed_trades
+                    """, (start_date, start_date, end_date, end_date))
+                    
+                    metrics = cur.fetchone()
+                    
+                    # 月次パフォーマンスの取得
+                    cur.execute("""
+                        SELECT 
+                            DATE_TRUNC('month', exit_date) as month,
+                            COUNT(*) as trades,
+                            ROUND(SUM(profit)::numeric, 2) as monthly_profit,
+                            ROUND(AVG(profit_rate)::numeric, 2) as avg_profit_rate
+                        FROM closed_trades
+                        GROUP BY DATE_TRUNC('month', exit_date)
+                        ORDER BY month
+                    """)
+                    monthly_performance = cur.fetchall()
+                    
+                    return {
+                        "summary": {
+                            "total_trades": metrics[0],
+                            "winning_trades": metrics[1],
+                            "losing_trades": metrics[2],
+                            "win_rate": round(metrics[1] / metrics[0] * 100, 2) if metrics[0] > 0 else 0,
+                            "avg_profit": metrics[3],
+                            "avg_profit_rate": metrics[4],
+                            "max_profit": metrics[5],
+                            "max_loss": metrics[6],
+                            "total_profit": metrics[7],
+                            "profit_factor": abs(metrics[8] / metrics[9]) if metrics[9] else 0,
+                            "avg_holding_days": metrics[10],
+                            "exit_reasons": metrics[11]
+                        },
+                        "monthly_performance": [
+                            {
+                                "month": month,
+                                "trades": trades,
+                                "profit": profit,
+                                "avg_profit_rate": rate
+                            } for month, trades, profit, rate in monthly_performance
+                        ]
+                    }
+                    
+        except Exception as e:
+            self.logger.error(f"テストトレード分析エラー: {e}")
+            return {}
+
+    def get_test_reset_history(self, limit: int = 10) -> List[Dict]:
+        """
+        テストモードのリセット履歴を取得
+        
+        Args:
+            limit (int): 取得する履歴の数
+            
+        Returns:
+            List[Dict]: リセット履歴のリスト
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        WITH reset_points AS (
+                            SELECT 
+                                archived_at as reset_time,
+                                COUNT(*) as closed_positions,
+                                ROUND(SUM(profit)::numeric, 2) as total_profit,
+                                ROUND(AVG(profit_rate)::numeric, 2) as avg_profit_rate
+                            FROM entries_history
+                            WHERE is_test = true 
+                            AND exit_reason = 'System Reset'
+                            GROUP BY archived_at
+                            ORDER BY archived_at DESC
+                            LIMIT %s
+                        ),
+                        funds_history AS (
+                            SELECT 
+                                archived_at,
+                                available_funds as initial_funds
+                            FROM trade_results_history
+                            WHERE is_test = true 
+                            AND symbol_code = '0000'
+                            AND trade_type = 'entry'
+                        )
+                        SELECT 
+                            r.reset_time,
+                            r.closed_positions,
+                            r.total_profit,
+                            r.avg_profit_rate,
+                            f.initial_funds
+                        FROM reset_points r
+                        LEFT JOIN funds_history f 
+                        ON DATE_TRUNC('second', r.reset_time) = DATE_TRUNC('second', f.archived_at)
+                        ORDER BY r.reset_time DESC
+                    """, (limit,))
+                    
+                    results = cur.fetchall()
+                    return [{
+                        "reset_time": row[0],
+                        "closed_positions": row[1],
+                        "total_profit": row[2],
+                        "avg_profit_rate": row[3],
+                        "initial_funds": row[4]
+                    } for row in results]
+                    
+        except Exception as e:
+            self.logger.error(f"リセット履歴取得エラー: {e}")
+            return []
+
+    def generate_test_performance_report(self, start_date: Optional[date] = None, end_date: Optional[date] = None) -> Dict:
+        """
+        テストトレードのパフォーマンスレポートを生成
+        
+        Args:
+            start_date (date, optional): レポート開始日
+            end_date (date, optional): レポート終了日
+            
+        Returns:
+            Dict: パフォーマンスレポート
+        """
+        try:
+            # 基本的なパフォーマンス指標を取得
+            performance_metrics = self.analyze_test_trading_history(start_date, end_date)
+            
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    # 業種別パフォーマンス
+                    cur.execute("""
+                        SELECT 
+                            c.industry_name,
+                            COUNT(*) as trades,
+                            ROUND(AVG(h.profit_rate)::numeric, 2) as avg_profit_rate,
+                            ROUND(SUM(h.profit)::numeric, 2) as total_profit
+                        FROM entries_history h
+                        JOIN companies c ON h.code = c.code
+                        WHERE h.is_test = true
+                        AND h.status = 'closed'
+                        AND (h.entry_date >= %s OR %s IS NULL)
+                        AND (h.exit_date <= %s OR %s IS NULL)
+                        GROUP BY c.industry_name
+                        ORDER BY total_profit DESC
+                    """, (start_date, start_date, end_date, end_date))
+                    industry_performance = cur.fetchall()
+                    
+                    # 保有期間別パフォーマンス
+                    cur.execute("""
+                        WITH holding_periods AS (
+                            SELECT 
+                                CASE 
+                                    WHEN EXTRACT(DAY FROM (exit_date - entry_date)) <= 5 THEN '5日以内'
+                                    WHEN EXTRACT(DAY FROM (exit_date - entry_date)) <= 10 THEN '6-10日'
+                                    WHEN EXTRACT(DAY FROM (exit_date - entry_date)) <= 20 THEN '11-20日'
+                                    ELSE '21日以上'
+                                END as period_range,
+                                profit,
+                                profit_rate
+                            FROM entries_history
+                            WHERE is_test = true
+                            AND status = 'closed'
+                            AND (entry_date >= %s OR %s IS NULL)
+                            AND (exit_date <= %s OR %s IS NULL)
+                        )
+                        SELECT 
+                            period_range,
+                            COUNT(*) as trades,
+                            ROUND(AVG(profit_rate)::numeric, 2) as avg_profit_rate,
+                            ROUND(SUM(profit)::numeric, 2) as total_profit
+                        FROM holding_periods
+                        GROUP BY period_range
+                        ORDER BY 
+                            CASE period_range
+                                WHEN '5日以内' THEN 1
+                                WHEN '6-10日' THEN 2
+                                WHEN '11-20日' THEN 3
+                                ELSE 4
+                            END
+                    """, (start_date, start_date, end_date, end_date))
+                    holding_period_performance = cur.fetchall()
+                    
+                    return {
+                        "summary": performance_metrics["summary"],
+                        "monthly_performance": performance_metrics["monthly_performance"],
+                        "industry_performance": [{
+                            "industry": row[0],
+                            "trades": row[1],
+                            "avg_profit_rate": row[2],
+                            "total_profit": row[3]
+                        } for row in industry_performance],
+                        "holding_period_performance": [{
+                            "period_range": row[0],
+                            "trades": row[1],
+                            "avg_profit_rate": row[2],
+                            "total_profit": row[3]
+                        } for row in holding_period_performance]
+                    }
+                    
+        except Exception as e:
+            self.logger.error(f"パフォーマンスレポート生成エラー: {e}")
+            return {} 
