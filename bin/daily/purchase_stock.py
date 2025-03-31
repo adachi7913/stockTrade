@@ -1,15 +1,40 @@
 import os
 import sys
 
+# デバッグ情報の出力
+def print_debug_info():
+    print("\n=== デバッグ情報 ===")
+    print(f"Python バージョン: {sys.version}")
+    print(f"実行ファイル: {__file__}")
+    print(f"初期カレントディレクトリ: {os.getcwd()}")
+    print(f"PYTHONPATH: {sys.path}")
+    print(f"環境変数:")
+    for key, value in os.environ.items():
+        if key.startswith(('PYTHON', 'PATH', 'VIRTUAL_ENV')):
+            print(f"  {key}: {value}")
+    print("==================\n")
+
+# デバッグ情報を表示
+print_debug_info()
+
 # ルートディレクトリの取得とPythonパスの設定
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # 3階層上がルート
 sys.path.insert(0, root_dir)  # 最優先でルートディレクトリを検索パスに追加
 print(f"ルートディレクトリ: {root_dir}")
 os.chdir(root_dir)  # カレントディレクトリの移動
 
+# カレントディレクトリの変更を確認
+print(f"変更後のカレントディレクトリ: {os.getcwd()}")
+print(f"更新後のPYTHONPATH先頭: {sys.path[0]}")
+
 from typing import Dict, List
 from dotenv import load_dotenv
 import time
+
+# .envファイルの存在確認
+env_path = os.path.join(root_dir, '.env')
+print(f"\n.envファイルのパス: {env_path}")
+print(f".envファイルの存在: {os.path.exists(env_path)}")
 
 from repository.entry_repository import EntryRepository
 from repository.fund_manager import FundManager
@@ -739,6 +764,7 @@ def main():
         --min-score: エントリースコアの最低値（デフォルト: 70.0）
         --api-delay: API呼び出し間の待機時間（デフォルト: 30秒）
         --allow-position-increase: 保有銘柄の買い増しを許可する
+        --debug: デバッグモードを有効にする
     """
     import argparse
     
@@ -752,8 +778,24 @@ def main():
     parser.add_argument('--min-score', type=float, default=70.0, help='エントリースコアの最低値')
     parser.add_argument('--api-delay', type=int, default=30, help='API呼び出し間の待機時間（秒）')
     parser.add_argument('--allow-position-increase', action='store_true', help='保有銘柄の買い増しを許可する')
+    parser.add_argument('--debug', action='store_true', help='デバッグモードを有効にする')
     
     args = parser.parse_args()
+    
+    # デバッグモードが有効な場合は追加の情報を表示
+    if args.debug:
+        print("\n=== 実行時デバッグ情報 ===")
+        print(f"コマンドライン引数: {sys.argv}")
+        print(f"解析された引数: {args}")
+        print(f"実行時のPYTHONPATH: {sys.path}")
+        print(f"実行時のカレントディレクトリ: {os.getcwd()}")
+        try:
+            import dotenv
+            print(f"python-dotenv バージョン: {dotenv.__version__}")
+            print(f"dotenv の場所: {dotenv.__file__}")
+        except ImportError as e:
+            print(f"python-dotenv インポートエラー: {e}")
+        print("=====================\n")
     
     # EntryRepositoryのインスタンス化
     entry_repository = EntryRepository()
