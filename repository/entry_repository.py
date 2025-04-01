@@ -101,7 +101,7 @@ class EntryRepository(BaseRepository):
         エントリー情報をDBに保存します
         
         Args:
-            entry_data (Dict): 保存するエントリー情報
+            entry_data (Dict): 保存するエントリー情報 (position を含む必要がある)
             
         Returns:
             bool: 保存成功でTrue
@@ -113,12 +113,14 @@ class EntryRepository(BaseRepository):
                 code, entry_date, entry_price, stop_loss,
                 target_price, reason, holding_period,
                 risk_reward, quantity, status,
-                is_test, created_at, updated_at
+                is_test, created_at, updated_at,
+                position
             ) VALUES (
                 %(code)s, %(entry_date)s, %(entry_price)s, %(stop_loss)s,
                 %(target_price)s, %(reason)s, %(holding_period)s,
                 %(risk_reward)s, %(quantity)s, %(status)s,
-                %(is_test)s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                %(is_test)s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                %(position)s
             );
             """
             

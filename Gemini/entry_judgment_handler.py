@@ -369,6 +369,24 @@ class EntryJudgmentHandler:
                 else:
                     judgment['confidence'] = 0
                 
+                # ★ position フィールドの取得と検証
+                if 'position' in judgment:
+                    pos = judgment['position']
+                    if pos not in ['long', 'short', 'hold']:
+                        self.logger.warning(f"不正なposition値: {pos}。'hold'に設定します。")
+                        judgment['position'] = 'hold'
+                else:
+                    # positionフィールドがない場合、should_enterから推測するか、デフォルトを'hold'にする
+                    if judgment.get('should_enter', False):
+                         # should_enter が True だが position がない場合、デフォルトで 'long' を仮定するか、エラー/警告を出す
+                         self.logger.warning("'position'フィールドがありません。'should_enter'がtrueのため、'long'と仮定します。")
+                         judgment['position'] = 'long'
+                    else:
+                         judgment['position'] = 'hold'
+
+                # ★ should_enter を position に基づいて再設定（整合性確保）
+                judgment['should_enter'] = judgment['position'] in ['long', 'short']
+                
                 # 必須フィールドの確認
                 if 'reasoning' not in judgment:
                     judgment['reasoning'] = "理由は提供されませんでした"
@@ -391,9 +409,20 @@ class EntryJudgmentHandler:
             'concerns': '解析エラーのため、エントリーを見送ります'
         }
         
-        # should_enterの検出を試みる
-        if 'エントリーすべき' in response_text or '購入すべき' in response_text or 'should_enter: true' in response_text:
+        # ★ position の簡易解析を追加
+        if 'ロング' in response_text or '買い' in response_text:
+            judgment['position'] = 'long'
             judgment['should_enter'] = True
+        elif 'ショート' in response_text or '売り' in response_text:
+            judgment['position'] = 'short'
+            judgment['should_enter'] = True
+        else:
+            judgment['position'] = 'hold'
+            judgment['should_enter'] = False
+        
+        # should_enterの検出を試みる (これは position で上書きされる可能性がある)
+        if 'エントリーすべき' in response_text or '購入すべき' in response_text or 'should_enter: true' in response_text:
+            # judgment['should_enter'] = True # positionベースで判断するのでコメントアウト
             judgment['confidence'] = 50  # デフォルト値
         
         # confidenceの検出を試みる
@@ -457,60 +486,33 @@ class EntryJudgmentHandler:
             }}
             """
 
-            # GeminiAPIにリクエスト送信
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-            
-            payload = {
-                "contents": [
-                    {
-                        "parts": [
-                            {"text": prompt}
-                        ]
-                    }
-                ]
-            }
-            headers = {'Content-Type': 'application/json'}
+            # ★ ライブラリ経由でAPIリクエスト送信
+            response = self._query_gemini(prompt)
 
-            max_retries = 3
-            attempt = 0
-            
-            while attempt < max_retries:
-                try:
-                    response = requests.post(api_url, json=payload, headers=headers)
-                    
-                    if response.status_code == 503:
-                        attempt += 1
-                        self.logger.warning(f"Gemini API returned 503. Retrying {attempt}/{max_retries} after 5 seconds...")
-                        time.sleep(5)
-                        continue
-                        
-                    response.raise_for_status()
-                    json_response = response.json()
-                    
-                    try:
-                        content = json_response['candidates'][0]['content']['parts'][0]['text']
-                        json_text = self._extract_json(content)
-                        evaluation = json.loads(json_text)
-                        self.logger.info(f"評価結果: {evaluation}")
-                        return evaluation
-                            
-                    except Exception as e:
-                        self.logger.error(f"レスポンス解析エラー: {e}")
-                        
-                except requests.RequestException as e:
-                    if e.response is not None and e.response.status_code == 503:
-                        attempt += 1
-                        self.logger.warning(f"RequestException with 503 received. Retrying {attempt}/{max_retries} after 5 seconds...")
-                        time.sleep(5)
-                        continue
-                    else:
-                        self.logger.error(f"API呼び出しエラー: {e}")
-                        break
+            if not response:
+                self.logger.error(f"銘柄 {candidate.get('code', 'unknown')} のエントリー評価でAPIレスポンスの取得に失敗しました")
+                return None
 
+            # ★ レスポンス解析
+            try:
+                content = response.text
+                json_text = self._extract_json(content)
+                evaluation = json.loads(json_text)
+                self.logger.info(f"評価結果: {evaluation}")
+                return evaluation
+            except json.JSONDecodeError as e:
+                self.logger.error(f"レスポンスJSON解析エラー: {e}")
+                self.logger.error(f"エラーが発生したレスポンス: {response.text[:500]}...") # エラー時のレスポンス内容をログに出力
+                return None
+            except Exception as e:
+                self.logger.error(f"レスポンス解析中に予期せぬエラー: {e}")
+                return None
+
+        except StopCandidateException as e:
+            self.logger.error(f"エントリー評価中にコンテンツフィルタリングまたは他の理由で停止: {e}")
             return None
-
         except Exception as e:
-            self.logger.error(f"エントリー評価中にエラーが発生: {e}")
+            self.logger.error(f"エントリー評価中に予期せぬエラーが発生: {e}", exc_info=True) # トレースバック情報を追加
             return None
 
     def judge_exit_timing(self, code: str, industry_name: str, entry_price: float, 

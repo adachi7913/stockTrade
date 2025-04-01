@@ -39,7 +39,8 @@ def validate_response_data(data, logger=None):
         'rule_top_price': (str, int, float),    # 数値型も許容
         'rule_period': str,
         'risk_reward': (str, int, float),        # 数値型も許容
-        'no_entry_span': int
+        'no_entry_span': int,
+        'position': str  # ★ positionフィールドの検証を追加
     }
     
     # オプションフィールドの定義
@@ -127,6 +128,12 @@ def validate_response_data(data, logger=None):
         else:
             return False
     
+    # ★ positionの値が 'long', 'short', 'hold' のいずれかであることを検証
+    position = data.get('position', 'hold') # デフォルトは hold
+    if position not in ['long', 'short', 'hold']:
+        log.error(f"Invalid position value: {position}. Must be 'long', 'short', or 'hold'. Defaulting to 'hold'.")
+        data['position'] = 'hold' # 不正な値の場合は hold に設定
+    
     return True
 
 def parse_response(full_data, response, code=None, logger=None):
@@ -183,6 +190,7 @@ def parse_response(full_data, response, code=None, logger=None):
         entry_score = response_data.get("entry_score", 0)
         reason = response_data.get("reason", "")
         rule = response_data.get("rule", {})
+        position = response_data.get("position", "hold") # ★ positionフィールドを取得 (デフォルトは hold)
         
         # 数値型の場合は文字列に変換する処理を追加
         if isinstance(rule, str):
@@ -268,11 +276,13 @@ def parse_response(full_data, response, code=None, logger=None):
             "rule_period": rule_period,
             "risk_reward": risk_reward,
             "no_entry_span": min(14, max(1, response_data.get("no_entry_span", 0))),  # 1～14の範囲に制限
-            "entry_score": entry_score,
+            "entry_score": safe_int(entry_score),
             "expected_return": expected_return,
             "reason": reason,
+            "update_when": datetime.now(),  # 現在日時を追加
+            "position": position,  # ★ positionを追加
             # 新しいフィールドを追加
-            "entry_conditions": entry_conditions,
+            "entry_conditions": str(response_data.get('entry_conditions', '')), # リストの場合も文字列化
             "exit_conditions": exit_conditions,
             "short_term_trend": short_term_trend,
             "mid_term_trend": mid_term_trend,

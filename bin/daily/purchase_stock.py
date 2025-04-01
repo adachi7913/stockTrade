@@ -625,6 +625,7 @@ class StockPurchaseManager:
                 candidate['entry_date'] = datetime.now().strftime('%Y-%m-%d')
                 candidate['status'] = 'active'  # 新規エントリーは'active'ステータス
                 candidate['reason'] = judgment.get('reasoning', '理由なし')  # AIの判断理由を設定
+                candidate['position'] = judgment.get('position', 'hold') # ★ AIの判断結果からpositionを取得し、candidateに追加 (デフォルトは hold)
                 
                 # AIの判断結果から保有期間を設定
                 rule = judgment.get('rule', {})

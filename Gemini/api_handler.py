@@ -5,6 +5,7 @@ import re
 from decimal import Decimal
 import time  # リトライ用に追加
 import logging
+import google.generativeai as genai  # ★ インポート追加
 
 class ApiHandler:
 
@@ -117,21 +118,25 @@ class ApiHandler:
            - 過去の類似パターンとの比較分析
 
         【タスク】
-        1. 提供データを元に段階的フィルタリングを実施
-        2. 各評価基準に基づいてスコアリング
-        3. バックテストによる検証
-           - 各戦略の結果を分析し、現在の市場状況に最も適した戦略を特定
-           - 期間による結果の違いから、市場環境の変化を考慮
-           - 取引パターンから、成功率の高いエントリー・決済条件を抽出
-        4. データ品質の確認と反映
-        5. 上記の追加分析を実施
-        6. 信頼性のスコアが700点を超える場合、ロングポジションでのエントリールール（entryPrice, stop_loss, target_price, period, risk_reward）を出力してください。
-        7. 信頼性のスコアが700点を超えない場合、ロングポジションでのエントリールール（entryPrice, stop_loss, target_price, period, risk_reward）はNGを出力してください。
+        1. 提供データを元に段階的フィルタリングを実施し、ロングポジションとショートポジションの両方についてエントリーの妥当性を評価してください。
+        2. 各評価基準に基づいて、ロングとショートそれぞれのエントリー信頼性スコアを算出してください（1000点満点）。
+        3. バックテストによる検証：
+           - 各戦略の結果を分析し、現在の市場状況に最も適した戦略をロング・ショートそれぞれで特定。
+           - 期間による結果の違いから、市場環境の変化を考慮。
+           - 取引パターンから、成功率の高いエントリー・決済条件をロング・ショートそれぞれで抽出。
+        4. データ品質の確認と反映。
+        5. 上記の追加分析を実施。
+        6. **ロング**の信頼性スコアが700点を超える場合、ロングポジションでのエントリールールを出力候補とします。
+        7. **ショート**の信頼性スコアが700点を超える場合、ショートポジションでのエントリールールを出力候補とします。（ショートの目標価格はエントリー価格より低く、ストップロスはエントリー価格より高くなります）
+        8. ロング・ショート両方のスコアが700点を超える場合は、**よりスコアの高い方**のルールを採用してください。
+        9. ロング・ショートどちらか一方のスコアのみが700点を超える場合は、そのポジションのルールを採用してください。
+        10. ロング・ショート両方のスコアが700点以下の場合、ポジションは「hold」（見送り）とし、ルールはすべて"NG"としてください。
 
         【出力形式】（以下のJSON形式を厳守し、その他の内容は含めないでください）
         {{
-            "entry_score": <0〜1000の整数>,
-            "reason": "エントリー判断の理由及び各段階での点数根拠",
+            "position": "long" or "short" or "hold",
+            "entry_score": <0〜1000の整数 (採用されたポジションのスコア、見送りの場合は0)>,
+            "reason": "エントリー判断の理由及び各段階での点数根拠（ロング・ショート両方の評価を含む）",
             "rule": {{
                 "entryPrice": "エントリー価格（金額のみ）" or "NG",
                 "stop_loss": "ストップロス価格（金額のみ）" or "NG",
@@ -139,8 +144,8 @@ class ApiHandler:
                 "period": "推奨保有期間（整数:1 - 14）" or "NG",
                 "risk_reward": "リスクリワード比（計算結果）" or "NG"
             }},
-            "entry_conditions": "具体的なエントリートリガー条件を箇条書きで記述",
-            "exit_conditions": "具体的な決済条件を箇条書きで記述",
+            "entry_conditions": "具体的なエントリートリガー条件（採用ポジション）",
+            "exit_conditions": "具体的な決済条件（採用ポジション）",
             "market_analysis": {{
                 "short_term_trend": "短期トレンドの方向と強さ",
                 "mid_term_trend": "中期トレンドの方向と強さ",
@@ -148,7 +153,7 @@ class ApiHandler:
                 "support_resistance": "主要なサポート/レジスタンスレベル"
             }},
             "technical_patterns": "検出されたチャートパターンと価格形成の特徴",
-            "indicator_analysis": "複数指標の総合分析結果",
+            "indicator_analysis": "複数指標の総合分析結果（ロング・ショート両視点）",
             "no_entry_span": <再判断までの日数（整数:1 - 14）>
         }}
         """
@@ -157,8 +162,20 @@ class ApiHandler:
     def __init__(self, data, prompt=None, backtest_results=None, logger=None):
         self.data = data
         self.backtest_results = backtest_results or []
-        self.logger = logger if logger else logging.getLogger()
+        self.logger = logger if logger else logging.getLogger(__name__) # ★ ロガーのデフォルト名を修正
         self.prompt = prompt if prompt else self.get_prompt()
+
+        # ★ APIキーの設定とモデルの初期化を追加
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            self.logger.error("GEMINI_API_KEY environment variable not set.")
+            raise ValueError("APIキーが設定されていません。")
+        genai.configure(api_key=api_key)
+
+        # 使用するモデル名を取得 (環境変数 or デフォルト値)
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
+        self.model = genai.GenerativeModel(model_name)
+        self.logger.info(f"ApiHandler initialized with model: {model_name}")
 
     def _extract_json(self, content):
         """
