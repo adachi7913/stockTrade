@@ -3,16 +3,20 @@ import sys
 
 # デバッグ情報の出力
 def print_debug_info():
-    print("\n=== デバッグ情報 ===")
-    print(f"Python バージョン: {sys.version}")
-    print(f"実行ファイル: {__file__}")
-    print(f"初期カレントディレクトリ: {os.getcwd()}")
-    print(f"PYTHONPATH: {sys.path}")
-    print(f"環境変数:")
+    logger.info("\n=== デバッグ情報 ===")
+    logger.info(f"Python バージョン: {sys.version}")
+    logger.info(f"実行ファイル: {__file__}")
+    logger.info(f"初期カレントディレクトリ: {os.getcwd()}")
+    logger.info(f"PYTHONPATH: {sys.path}")
+    logger.info(f"環境変数:")
     for key, value in os.environ.items():
         if key.startswith(('PYTHON', 'PATH', 'VIRTUAL_ENV')):
-            print(f"  {key}: {value}")
-    print("==================\n")
+            logger.info(f"  {key}: {value}")
+    logger.info("==================\n")
+
+# ロギングの設定
+from utils.logging_config import setup_logging, cleanup_old_logs
+logger = setup_logging("stock_purchase")
 
 # デバッグ情報を表示
 print_debug_info()
@@ -20,12 +24,12 @@ print_debug_info()
 # ルートディレクトリの取得とPythonパスの設定
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # 3階層上がルート
 sys.path.insert(0, root_dir)  # 最優先でルートディレクトリを検索パスに追加
-print(f"ルートディレクトリ: {root_dir}")
+logger.info(f"ルートディレクトリ: {root_dir}")
 os.chdir(root_dir)  # カレントディレクトリの移動
 
 # カレントディレクトリの変更を確認
-print(f"変更後のカレントディレクトリ: {os.getcwd()}")
-print(f"更新後のPYTHONPATH先頭: {sys.path[0]}")
+logger.info(f"変更後のカレントディレクトリ: {os.getcwd()}")
+logger.info(f"更新後のPYTHONPATH先頭: {sys.path[0]}")
 
 from typing import Dict, List
 from dotenv import load_dotenv
@@ -33,8 +37,8 @@ import time
 
 # .envファイルの存在確認
 env_path = os.path.join(root_dir, '.env')
-print(f"\n.envファイルのパス: {env_path}")
-print(f".envファイルの存在: {os.path.exists(env_path)}")
+logger.info(f"\n.envファイルのパス: {env_path}")
+logger.info(f".envファイルの存在: {os.path.exists(env_path)}")
 
 from repository.entry_repository import EntryRepository
 from repository.fund_manager import FundManager
@@ -785,18 +789,18 @@ def main():
     
     # デバッグモードが有効な場合は追加の情報を表示
     if args.debug:
-        print("\n=== 実行時デバッグ情報 ===")
-        print(f"コマンドライン引数: {sys.argv}")
-        print(f"解析された引数: {args}")
-        print(f"実行時のPYTHONPATH: {sys.path}")
-        print(f"実行時のカレントディレクトリ: {os.getcwd()}")
+        logger.info("\n=== 実行時デバッグ情報 ===")
+        logger.info(f"コマンドライン引数: {sys.argv}")
+        logger.info(f"解析された引数: {args}")
+        logger.info(f"実行時のPYTHONPATH: {sys.path}")
+        logger.info(f"実行時のカレントディレクトリ: {os.getcwd()}")
         try:
             import dotenv
-            print(f"python-dotenv バージョン: {dotenv.__version__}")
-            print(f"dotenv の場所: {dotenv.__file__}")
+            logger.info(f"python-dotenv バージョン: {dotenv.__version__}")
+            logger.info(f"dotenv の場所: {dotenv.__file__}")
         except ImportError as e:
-            print(f"python-dotenv インポートエラー: {e}")
-        print("=====================\n")
+            logger.info(f"python-dotenv インポートエラー: {e}")
+        logger.info("=====================\n")
     
     # EntryRepositoryのインスタンス化
     entry_repository = EntryRepository()
@@ -805,44 +809,44 @@ def main():
     if args.show_history:
         history = entry_repository.get_test_trade_history()
         if history:
-            print("\n=== テストモード取引履歴 ===")
+            logger.info("\n=== テストモード取引履歴 ===")
             for trade in history:
-                print(f"取引ID: {trade['trade_id']}")
-                print(f"日時: {trade['created_at']}")
-                print(f"種別: {trade['trade_type']}")
-                print(f"銘柄: {trade['symbol_code']}")
-                print(f"価格: {trade['entry_price']:,.0f}円")
-                print(f"数量: {trade['quantity']}株")
+                logger.info(f"取引ID: {trade['trade_id']}")
+                logger.info(f"日時: {trade['created_at']}")
+                logger.info(f"種別: {trade['trade_type']}")
+                logger.info(f"銘柄: {trade['symbol_code']}")
+                logger.info(f"価格: {trade['entry_price']:,.0f}円")
+                logger.info(f"数量: {trade['quantity']}株")
                 if trade['trade_type'] == 'sell':
-                    print(f"損益: {trade['profit_loss']:,.0f}円")
-                print(f"残高: {trade['available_funds']:,.0f}円")
-                print("---")
+                    logger.info(f"損益: {trade['profit_loss']:,.0f}円")
+                logger.info(f"残高: {trade['available_funds']:,.0f}円")
+                logger.info("---")
         else:
-            print("テストモードの取引履歴がありません")
+            logger.info("テストモードの取引履歴がありません")
         return
         
     if args.show_summary:
         summary = entry_repository.get_test_summary()
         if summary['test_start']:
-            print("\n=== テストモードサマリー ===")
-            print(f"テスト期間: {summary['test_start']} ～ {summary['test_end']}")
-            print(f"初期資金: {summary['initial_funds']:,.0f}円")
-            print(f"現在資金: {summary['current_funds']:,.0f}円")
-            print(f"総損益: {summary['total_profit']:,.0f}円")
-            print(f"取引回数: {summary['trade_count']}回")
-            print(f"勝ち取引: {summary['win_count']}回")
+            logger.info("\n=== テストモードサマリー ===")
+            logger.info(f"テスト期間: {summary['test_start']} ～ {summary['test_end']}")
+            logger.info(f"初期資金: {summary['initial_funds']:,.0f}円")
+            logger.info(f"現在資金: {summary['current_funds']:,.0f}円")
+            logger.info(f"総損益: {summary['total_profit']:,.0f}円")
+            logger.info(f"取引回数: {summary['trade_count']}回")
+            logger.info(f"勝ち取引: {summary['win_count']}回")
             if summary['trade_count'] > 0:
                 win_rate = (summary['win_count'] / summary['trade_count']) * 100
-                print(f"勝率: {win_rate:.1f}%")
+                logger.info(f"勝率: {win_rate:.1f}%")
         else:
-            print("テストモードのサマリー情報がありません")
+            logger.info("テストモードのサマリー情報がありません")
         return
         
     if args.reset_test:
         if entry_repository.reset_test_data(args.initial_funds):
-            print(f"テストデータをリセットしました。初期資金: {args.initial_funds:,.0f}円")
+            logger.info(f"テストデータをリセットしました。初期資金: {args.initial_funds:,.0f}円")
         else:
-            print("テストデータのリセットに失敗しました")
+            logger.info("テストデータのリセットに失敗しました")
         return
     
     # 通常の購入処理を実行
@@ -856,9 +860,9 @@ def main():
     success = manager.execute_purchase()
     
     if success:
-        print("購入処理が完了しました")
+        logger.info("購入処理が完了しました")
     else:
-        print("購入処理が失敗しました")
+        logger.error("購入処理が失敗しました")
         sys.exit(1)
 
 if __name__ == "__main__":
