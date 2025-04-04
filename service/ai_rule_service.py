@@ -64,26 +64,23 @@ def run_ai_rule_generation(logger=None):
                     logger.warning(f"{stock_code}: 株価情報がありません")
                     return
 
-                # フィルタリング 1: 株価が300円以上3000円以下
+                # フィルタリング 1: 株価が100円以上5000円以下
                 close_price = float(latest_price['close'])
-                if close_price < 300:
-                    logger.info(f"{stock_code}: 終値 {close_price} 円 は最低価格 300 円以上の条件を満たしていません。")
+                if close_price < 100:
+                    logger.info(f"{stock_code}: 終値 {close_price} 円 は最低価格 100 円以上の条件を満たしていません。")
                     return
-                if close_price > 3000:
-                    logger.info(f"{stock_code}: 終値 {close_price} 円 は 3000 円以下の条件を満たしていません。")
-                    return
-
-                # フィルタリング 2: 平均出来高が一定以上
-                avg_volume = repository.get_average_volume(code_4digit, industry_name, days=20)
-                if avg_volume < 100000:  # 10万株未満はスキップ
-                    logger.info(f"{stock_code}: 過去20日の平均出来高が10万株未満（{avg_volume}株）ため除外")
+                if close_price > 5000:
+                    logger.info(f"{stock_code}: 終値 {close_price} 円 は 5000 円以下の条件を満たしていません。")
                     return
 
-                # フィルタリング 3: ストップ高・ストップ安が続いていないか
-                price_limit_days = repository.check_price_limit_days(code_4digit, industry_name)
-                if price_limit_days > 0:
-                    logger.info(f"{stock_code}: 直近 {price_limit_days} 日連続でストップ高またはストップ安のため除外")
+                # フィルタリング 2: 平均出来高代金が一定以上 (5000万円)
+                avg_volume = repository.get_average_volume(code_4digit, industry_name, days=15)
+                avg_trading_value = avg_volume * close_price
+                if avg_trading_value < 50000000: # 5000万円未満はスキップ
+                    logger.info(f"{stock_code}: 過去15日の平均出来高代金が5000万円未満（{avg_trading_value:,.0f}円）のため除外")
                     return
+
+                # フィルタリング 3: ストップ高・ストップ安が続いていないか ← このフィルタは削除
 
                 # すべての条件を満たした場合
                 logger.info(f"{stock_code}: 全てのフィルタ条件を満たしています。")
