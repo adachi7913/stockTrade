@@ -399,7 +399,8 @@ class StockPurchaseManager:
                 volume_data=volume_data,
                 atr=atr,
                 rsi=rsi,
-                stoch_k=stoch_k
+                stoch_k=stoch_k,
+                logger=self.logger
             ):
                 filtered_candidates.append(candidate)
         
@@ -455,7 +456,8 @@ class StockPurchaseManager:
             entry_score = calculate_entry_score(
                 stock_data=candidate,
                 backtest_results=backtest_results,
-                technical_indicators=latest_data
+                technical_indicators=latest_data,
+                logger=self.logger
             )
             
             # 結果を候補に追加
@@ -863,7 +865,6 @@ def main():
         logger.info("購入処理が完了しました")
     else:
         logger.error("購入処理が失敗しました")
-        sys.exit(1)
 
 if __name__ == "__main__":
     main() 

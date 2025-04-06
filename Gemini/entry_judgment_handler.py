@@ -53,7 +53,9 @@ class EntryJudgmentHandler:
         
         # モデル設定
         if test_mode:
-            model_name = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
+            # model_name = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
+            # デバッグ用にテストモードでもGEMINI_PURCHASE_MODELを利用
+            model_name = os.getenv('GEMINI_PURCHASE_MODEL', 'gemini-pro')
         else:
             model_name = os.getenv('GEMINI_PURCHASE_MODEL', 'gemini-pro')
         self.logger.info(f"model_name: {model_name}")
@@ -348,7 +350,9 @@ class EntryJudgmentHandler:
         if json_matches:
             try:
                 # 最初のJSONブロックを解析
-                judgment = json.loads(json_matches[0])
+                raw_json_str = json_matches[0]
+                self.logger.info(f"抽出されたJSONブロック: {raw_json_str}") # ★ AIレスポンスJSONをログ出力
+                judgment = json.loads(raw_json_str)
                 
                 # 型変換
                 if 'should_enter' in judgment:

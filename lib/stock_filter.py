@@ -4,9 +4,9 @@ import yfinance as yf
 import numpy as np
 
 # ロガーの取得
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
-def filter_stock(stock_code, close, market_cap, last_no_entry_date=None, no_entry_span=None, volume_data=None, atr=None, rsi=None, stoch_k=None, min_close_threshold=300, close_threshold=3000, market_cap_threshold=1_000_000_000):
+def filter_stock(stock_code, close, market_cap, logger, last_no_entry_date=None, no_entry_span=None, volume_data=None, atr=None, rsi=None, stoch_k=None, min_close_threshold=300, close_threshold=3000, market_cap_threshold=1_000_000_000):
     """
     指定した銘柄を以下の条件でフィルタリングする関数
     
@@ -110,7 +110,7 @@ def filter_stock(stock_code, close, market_cap, last_no_entry_date=None, no_entr
     return True
 
 
-def calculate_entry_score(stock_data, backtest_results, technical_indicators):
+def calculate_entry_score(stock_data, backtest_results, technical_indicators, logger):
     """
     エントリースコアを計算する関数
     
@@ -387,8 +387,10 @@ def calculate_entry_score(stock_data, backtest_results, technical_indicators):
     
     # スコアの詳細をログに記録
     logger.info(f"{stock_code}: エントリースコア計算 - 最終スコア: {final_score:.2f}/100")
-    for key, value in scores.items():
-        logger.debug(f"{stock_code}: {key}スコア: {value}")
+    # スコアの詳細をデバッグログレベルで出力
+    score_details_log = f"{stock_code}: スコア内訳 -> "
+    score_details_log += ", ".join([f"{key}={value:.1f}" for key, value in scores.items()])
+    logger.info(score_details_log)
     
     return final_score
 
