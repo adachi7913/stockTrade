@@ -513,7 +513,7 @@ class MASmaRsiStrategy(bt.Strategy):
             current_rsi = self.rsi[0]
 
             # 詳細ログを追加 (INFOレベル)
-            self.log(f"Entry Check: LongTrendUp={is_long_trend_up}, SMACross={sma_cross_over_val > 0}, RSICrossLow={rsi_cross_over_low_val > 0} (RSI={current_rsi:.2f})")
+            # self.log(f"Entry Check: LongTrendUp={is_long_trend_up}, SMACross={sma_cross_over_val > 0}, RSICrossLow={rsi_cross_over_low_val > 0} (RSI={current_rsi:.2f})")
 
             # エントリーシグナル
             entry_signal = is_long_trend_up and (sma_cross_over_val > 0 or rsi_cross_over_low_val > 0)
@@ -943,7 +943,9 @@ def run_multiple_backtests(symbol: str, industry_name: str, strategies=None, per
     log = logger or logging.getLogger(__name__)
     
     if strategies is None:
-        strategies = ['tr', 're', 'bo', 'ma_rsi', 'bb_macd'] # デフォルトに新しい戦略を追加
+        # デフォルト戦略リストから 'tr' と 'bo' を削除
+        # strategies = ['tr', 're', 'bo', 'ma_rsi', 'bb_macd']
+        strategies = ['re', 'ma_rsi', 'bb_macd'] # トレンドフォローとブレイクアウトを除外
     
     if periods is None:
         today = datetime.date.today()
@@ -1146,8 +1148,9 @@ class BacktestService:
         try:
             self.logger.info(f"複数戦略バックテスト開始: 銘柄={code}, 業種={industry_name}, 期間={period_years}年")
             
-            # 戦略リストを更新
-            strategies = ['tr', 're', 'bo', 'ma_rsi', 'bb_macd']
+            # 実行戦略リストから 'tr' と 'bo' を削除
+            # strategies = ['tr', 're', 'bo', 'ma_rsi', 'bb_macd']
+            strategies = ['re', 'ma_rsi', 'bb_macd'] # トレンドフォローとブレイクアウトを除外
             self.logger.info(f"実行戦略: {', '.join(strategies)}")
             
             # 期間の設定
