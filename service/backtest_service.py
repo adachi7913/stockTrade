@@ -6,6 +6,7 @@ import math
 import datetime
 from repository.stock_repository import StockRepository
 from typing import List, Dict, Optional, Tuple, Any
+import numpy as np
 
 # モジュールレベルのロガーはそのまま残す（モジュール内で使用する場合用）
 logger = logging.getLogger(__name__)
@@ -138,8 +139,6 @@ class TrendFollowingStrategy(bt.Strategy):
         try:
             # ADX値の統計情報を計算
             if self.adx_values:
-                import numpy as np
-                
                 # 基本統計
                 adx_values = np.array(self.adx_values)
                 adx_min = np.min(adx_values)
@@ -406,7 +405,365 @@ class BreakoutStrategy(bt.Strategy):
             self.logger.error(f"BreakoutStrategy.next()でエラー発生: {e}")
             self.logger.error(f"詳細なエラー情報: {traceback.format_exc()}")
 
-def run_backtest(symbol: str, start_date: str, end_date: str, strategy_type: str, lot_size: int = 100, logger=None):
+class MASmaRsiStrategy(bt.Strategy):
+    """
+    移動平均線クロス + RSI + 長期トレンドフィルター戦略
+    """
+    params = (
+        ('short_sma', 5),
+        ('mid_sma', 20),
+        ('long_sma', 75),
+        ('rsi_period', 14),
+        ('atr_period', 14),
+        ('rsi_low', 30),
+        ('rsi_high', 70),
+        ('stop_loss_atr_multiplier', 1.5),
+        ('time_limit_days', 5),
+        ('lot_size', 100),
+        ('logger', None),
+    )
+
+    def __init__(self):
+        self.logger = self.params.logger or logger
+        self.logger.debug("MASmaRsiStrategy 初期化開始")
+
+        # 指標の初期化
+        self.sma_short = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.short_sma)
+        self.sma_mid = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.mid_sma)
+        self.sma_long = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.long_sma)
+        self.rsi = bt.indicators.RSI(self.data.close, period=self.params.rsi_period)
+        self.atr = bt.indicators.ATR(self.data, period=self.params.atr_period)
+
+        # クロスオーバー検出
+        self.sma_cross_over = bt.indicators.CrossOver(self.sma_short, self.sma_mid)
+        self.rsi_cross_over_low = bt.indicators.CrossOver(self.rsi, self.params.rsi_low)
+        self.rsi_cross_down_high = bt.indicators.CrossDown(self.rsi, self.params.rsi_high)
+        self.sma_cross_down = bt.indicators.CrossDown(self.sma_short, self.sma_mid)
+
+        self.order = None
+        self.entry_price = None
+        self.entry_bar = None # エントリーしたバーのインデックス
+        self.trades = [] # 取引履歴
+
+        self.logger.debug("MASmaRsiStrategy 初期化完了")
+
+    def calculate_lot_size(self, current_price):
+        """利用可能な資金から適切なロットサイズを計算"""
+        if current_price <= 0.01:
+            self.logger.warning(f"株価が異常値です: {current_price}円 - ロットサイズを0に設定します")
+            return 0
+
+        available_cash = self.broker.getcash()
+        affordable_size = math.floor((available_cash / current_price) / 100) * 100
+        actual_size = min(self.params.lot_size, affordable_size)
+        return actual_size if actual_size >= 100 else 0
+
+    def notify_order(self, order):
+        """注文状態が変化した際に呼ばれるメソッド"""
+        if order.status in [order.Submitted, order.Accepted]:
+            # 注文が送信/受理された場合は何もしない
+            return
+
+        if order.status in [order.Completed]:
+            if order.isbuy():
+                post_cash = self.broker.getcash()
+                self.logger.info(
+                    f'BUY EXECUTED, Price: {order.executed.price:.2f}, Cost: {order.executed.value:.2f}, Comm: {order.executed.comm:.2f}, Size: {order.executed.size}, Cash: {post_cash:.0f}'
+                )
+                self.entry_price = order.executed.price
+                self.entry_bar = len(self) # 現在のバーのインデックスを記録
+                # 取引情報を記録 (仮) - 決済時に詳細を追加
+                self.trades.append({
+                    "entry_date": self.data.datetime.date(0).isoformat(),
+                    "entry_price": order.executed.price,
+                    "lot": order.executed.size,
+                })
+            elif order.issell():
+                post_cash = self.broker.getcash()
+                profit = order.executed.pnl
+                self.logger.info(
+                    f'SELL EXECUTED, Price: {order.executed.price:.2f}, Profit: {profit:.2f}, Comm: {order.executed.comm:.2f}, Size: {order.executed.size}, Cash: {post_cash:.0f}'
+                )
+                # 決済情報を記録
+                if self.trades:
+                    self.trades[-1].update({
+                        "exit_date": self.data.datetime.date(0).isoformat(),
+                        "exit_price": order.executed.price,
+                        "profit": profit,
+                    })
+
+            self.order = None
+
+        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
+            self.logger.warning(f'Order Canceled/Margin/Rejected: Status {order.getstatusname()}')
+            self.order = None
+
+    def next(self):
+        if self.order: # 未約定の注文がある場合は何もしない
+            return
+
+        # ポジションがない場合：エントリーロジック
+        if not self.position:
+            # 長期トレンドフィルター (SMA75が上昇中か)
+            is_long_trend_up = self.sma_long[0] > self.sma_long[-1]
+
+            # エントリーシグナル条件評価
+            sma_cross_over_val = self.sma_cross_over[0]
+            rsi_cross_over_low_val = self.rsi_cross_over_low[0]
+            current_rsi = self.rsi[0]
+
+            # 詳細ログを追加 (INFOレベル)
+            self.log(f"Entry Check: LongTrendUp={is_long_trend_up}, SMACross={sma_cross_over_val > 0}, RSICrossLow={rsi_cross_over_low_val > 0} (RSI={current_rsi:.2f})")
+
+            # エントリーシグナル
+            entry_signal = is_long_trend_up and (sma_cross_over_val > 0 or rsi_cross_over_low_val > 0)
+
+            if entry_signal:
+                current_price = self.data.close[0]
+                actual_size = self.calculate_lot_size(current_price)
+
+                if actual_size > 0:
+                    self.log(f'BUY CREATE, Price: {current_price:.2f}, Size: {actual_size}')
+                    self.order = self.buy(size=actual_size)
+                else:
+                    self.log(f'エントリーシグナル発生、しかしロットサイズが0のため見送り Price: {current_price:.2f}')
+
+        # ポジションがある場合：イグジットロジック
+        else:
+            exit_signal = False
+            exit_reason = ""
+
+            # 各イグジット条件の評価
+            sma_cross_down_val = self.sma_cross_down[0]
+            rsi_cross_down_high_val = self.rsi_cross_down_high[0]
+            current_rsi = self.rsi[0]
+            stop_loss_price = self.entry_price - (self.params.stop_loss_atr_multiplier * self.atr[0]) if self.entry_price else None
+            current_close = self.data.close[0]
+            bars_held = (len(self) - self.entry_bar) if self.entry_bar is not None else -1
+            time_limit = self.params.time_limit_days
+
+            # 詳細ログを追加 (INFOレベル)
+            self.log(f"Exit Check: SMACrossDown={sma_cross_down_val < 0}, RSICrossHigh={rsi_cross_down_high_val < 0} (RSI={current_rsi:.2f}), SLHit={current_close <= stop_loss_price if stop_loss_price else False} (Close={current_close:.2f}, SL={f'{stop_loss_price:.2f}' if stop_loss_price else 'N/A'}), TimeLimitHit={bars_held >= time_limit} (Held={bars_held}, Limit={time_limit})")
+
+
+            # 1. 利確 (デッドクロス)
+            if sma_cross_down_val < 0:
+                exit_signal = True
+                exit_reason = "利確 (SMAデッドクロス)"
+
+            # 2. 利確 (RSI)
+            elif rsi_cross_down_high_val < 0:
+                exit_signal = True
+                exit_reason = "利確 (RSI 70割れ)"
+
+            # 3. 損切り (ATR)
+            elif stop_loss_price is not None and current_close <= stop_loss_price:
+                exit_signal = True
+                exit_reason = f"損切り (ATR: {self.atr[0]:.2f}, SL Price: {stop_loss_price:.2f})"
+
+            # 4. 時間制限
+            elif self.entry_bar is not None and bars_held >= time_limit:
+                exit_signal = True
+                exit_reason = f"時間制限 ({time_limit}日経過)"
+
+            if exit_signal:
+                self.log(f'SELL CREATE ({exit_reason}), Price: {current_close:.2f}, Size: {self.position.size}')
+                self.order = self.close()
+                # 決済注文が出たらエントリー価格とバーをリセット
+                self.entry_price = None
+                self.entry_bar = None
+
+    # ログ出力用のヘルパーメソッドを追加
+    def log(self, txt, dt=None):
+        ''' Logging function for this strategy'''
+        dt = dt or self.data.datetime.date(0)
+        self.logger.info(f'{dt.isoformat()} - {txt}') # loggerを使用
+
+    def stop(self):
+        """バックテスト終了時に呼ばれるメソッド"""
+        self.logger.info(f'MASmaRsiStrategy Parameters: {self.params._getkwargs()}')
+        self.logger.info(f'Ending Value {self.broker.getvalue():,.0f}')
+        # 必要なら取引結果の集計などを行う
+
+class BollingerMacdStrategy(bt.Strategy):
+    """
+    ボリンジャーバンド + MACD + 長期トレンドフィルター戦略
+    """
+    params = (
+        ('bb_period', 20),
+        ('bb_devfactor', 2),
+        ('macd_fast', 12),
+        ('macd_slow', 26),
+        ('macd_signal', 9),
+        ('long_sma', 75),
+        ('atr_period', 14),
+        ('stop_loss_atr_multiplier', 1.5),
+        ('time_limit_days', 5),
+        ('lot_size', 100),
+        ('logger', None),
+    )
+
+    def __init__(self):
+        self.logger = self.params.logger or logger
+        self.logger.debug("BollingerMacdStrategy 初期化開始")
+
+        # 指標の初期化
+        self.bband = bt.indicators.BollingerBands(self.data.close, period=self.params.bb_period, devfactor=self.params.bb_devfactor)
+        self.macd = bt.indicators.MACD(self.data.close, period_me1=self.params.macd_fast, period_me2=self.params.macd_slow, period_signal=self.params.macd_signal)
+        self.sma_long = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.long_sma)
+        self.atr = bt.indicators.ATR(self.data, period=self.params.atr_period)
+
+        # クロスオーバー検出
+        self.macd_cross_over = bt.indicators.CrossOver(self.macd.macd, self.macd.signal)
+        self.macd_cross_down = bt.indicators.CrossDown(self.macd.macd, self.macd.signal)
+
+        self.order = None
+        self.entry_price = None
+        self.entry_bar = None # エントリーしたバーのインデックス
+        self.trades = [] # 取引履歴
+
+        self.logger.debug("BollingerMacdStrategy 初期化完了")
+
+    def calculate_lot_size(self, current_price):
+        """利用可能な資金から適切なロットサイズを計算"""
+        if current_price <= 0.01:
+            self.logger.warning(f"株価が異常値です: {current_price}円 - ロットサイズを0に設定します")
+            return 0
+
+        available_cash = self.broker.getcash()
+        affordable_size = math.floor((available_cash / current_price) / 100) * 100
+        actual_size = min(self.params.lot_size, affordable_size)
+        return actual_size if actual_size >= 100 else 0
+
+    def notify_order(self, order):
+        """注文状態が変化した際に呼ばれるメソッド"""
+        if order.status in [order.Submitted, order.Accepted]:
+            return
+
+        if order.status in [order.Completed]:
+            if order.isbuy():
+                post_cash = self.broker.getcash()
+                self.logger.info(
+                    f'BUY EXECUTED, Price: {order.executed.price:.2f}, Cost: {order.executed.value:.2f}, Comm: {order.executed.comm:.2f}, Size: {order.executed.size}, Cash: {post_cash:.0f}'
+                )
+                self.entry_price = order.executed.price
+                self.entry_bar = len(self)
+                self.trades.append({
+                    "entry_date": self.data.datetime.date(0).isoformat(),
+                    "entry_price": order.executed.price,
+                    "lot": order.executed.size,
+                })
+            elif order.issell():
+                post_cash = self.broker.getcash()
+                profit = order.executed.pnl
+                self.logger.info(
+                    f'SELL EXECUTED, Price: {order.executed.price:.2f}, Profit: {profit:.2f}, Comm: {order.executed.comm:.2f}, Size: {order.executed.size}, Cash: {post_cash:.0f}'
+                )
+                if self.trades:
+                    self.trades[-1].update({
+                        "exit_date": self.data.datetime.date(0).isoformat(),
+                        "exit_price": order.executed.price,
+                        "profit": profit,
+                    })
+
+            self.order = None
+
+        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
+            self.logger.warning(f'Order Canceled/Margin/Rejected: Status {order.getstatusname()}')
+            self.order = None
+
+    def next(self):
+        if self.order: # 未約定の注文がある場合は何もしない
+            return
+
+        # ポジションがない場合：エントリーロジック
+        if not self.position:
+            # 長期トレンドフィルター (SMA75が上昇中か)
+            is_long_trend_up = self.sma_long[0] > self.sma_long[-1]
+
+            # ボリンジャーバンド下限タッチ条件
+            current_close = self.data.close[0]
+            bb_lower = self.bband.lines.bot[0]
+            is_touching_lower_band = current_close <= bb_lower
+
+            # MACD条件 (ゴールデンクロス かつ 0より上)
+            macd_cross_over_val = self.macd_cross_over[0]
+            macd_val = self.macd.macd[0]
+            is_macd_buy_signal = macd_cross_over_val > 0 and macd_val > 0
+
+            # 詳細ログを追加 (INFOレベル)
+            self.log(f"Entry Check: LongTrendUp={is_long_trend_up}, BBLowTouch={is_touching_lower_band} (Close={current_close:.2f}, BB Low={bb_lower:.2f}), MACDBuy(ignored)={is_macd_buy_signal} (Cross={macd_cross_over_val > 0}, MACD={macd_val:.2f})")
+
+            # エントリーシグナル
+            entry_signal = is_long_trend_up and is_touching_lower_band
+
+            if entry_signal:
+                actual_size = self.calculate_lot_size(current_close)
+
+                if actual_size > 0:
+                    self.log(f'BUY CREATE, Price: {current_close:.2f}, Size: {actual_size}')
+                    self.order = self.buy(size=actual_size)
+                else:
+                    self.log(f'エントリーシグナル発生、しかしロットサイズが0のため見送り Price: {current_close:.2f}')
+
+        # ポジションがある場合：イグジットロジック
+        else:
+            exit_signal = False
+            exit_reason = ""
+
+            # 各イグジット条件の評価
+            current_close = self.data.close[0]
+            bb_upper = self.bband.lines.top[0]
+            macd_cross_down_val = self.macd_cross_down[0]
+            stop_loss_price = self.entry_price - (self.params.stop_loss_atr_multiplier * self.atr[0]) if self.entry_price else None
+            current_atr = self.atr[0]
+            bars_held = (len(self) - self.entry_bar) if self.entry_bar is not None else -1
+            time_limit = self.params.time_limit_days
+
+            # 詳細ログを追加 (INFOレベル)
+            self.log(f"Exit Check: BBUpTouch={current_close >= bb_upper} (Close={current_close:.2f}, BB Up={bb_upper:.2f}), MACDCrossDown={macd_cross_down_val < 0}, SLHit={current_close <= stop_loss_price if stop_loss_price else False} (Close={current_close:.2f}, SL={f'{stop_loss_price:.2f}' if stop_loss_price else 'N/A'}), TimeLimitHit={bars_held >= time_limit} (Held={bars_held}, Limit={time_limit})")
+
+
+            # 1. 利確 (BB上限タッチ)
+            if current_close >= bb_upper:
+                exit_signal = True
+                exit_reason = "利確 (BB上限タッチ)"
+
+            # 2. 利確 (MACDデッドクロス)
+            elif macd_cross_down_val < 0:
+                exit_signal = True
+                exit_reason = "利確 (MACDデッドクロス)"
+
+            # 3. 損切り (ATR)
+            elif stop_loss_price is not None and current_close <= stop_loss_price:
+                exit_signal = True
+                exit_reason = f"損切り (ATR: {current_atr:.2f}, SL Price: {stop_loss_price:.2f})"
+
+            # 4. 時間制限
+            elif self.entry_bar is not None and bars_held >= time_limit:
+                exit_signal = True
+                exit_reason = f"時間制限 ({time_limit}日経過)"
+
+            if exit_signal:
+                self.log(f'SELL CREATE ({exit_reason}), Price: {current_close:.2f}, Size: {self.position.size}')
+                self.order = self.close()
+                # 決済注文が出たらエントリー価格とバーをリセット
+                self.entry_price = None
+                self.entry_bar = None
+
+    # ログ出力用のヘルパーメソッドを追加
+    def log(self, txt, dt=None):
+        ''' Logging function for this strategy'''
+        dt = dt or self.data.datetime.date(0)
+        self.logger.info(f'{dt.isoformat()} - {txt}') # loggerを使用
+
+    def stop(self):
+        """バックテスト終了時に呼ばれるメソッド"""
+        self.logger.info(f'BollingerMacdStrategy Parameters: {self.params._getkwargs()}')
+        self.logger.info(f'Ending Value {self.broker.getvalue():,.0f}')
+        # 必要なら取引結果の集計などを行う
+
+def run_backtest(symbol: str, start_date: str, end_date: str, strategy_type: str, lot_size: int = 100, initial_capital: float = 1000000.0, logger=None):
     """
     単一の戦略と期間でバックテストを実行し、結果を返します。
 
@@ -414,8 +771,9 @@ def run_backtest(symbol: str, start_date: str, end_date: str, strategy_type: str
         symbol: 銘柄シンボル
         start_date: 開始日（YYYY-MM-DD形式）
         end_date: 終了日（YYYY-MM-DD形式）
-        strategy_type: 戦略タイプ（'tr', 're', 'bo'のいずれか）
+        strategy_type: 戦略タイプ（'tr', 're', 'bo', 'ma_rsi', 'bb_macd'のいずれか）
         lot_size: ロットサイズ（デフォルト: 100株）
+        initial_capital: 初期資本（デフォルト: 1,000,000円）
         logger: ロガーインスタンス（デフォルト: None）
 
     Returns:
@@ -508,26 +866,36 @@ def run_backtest(symbol: str, start_date: str, end_date: str, strategy_type: str
     # BacktraderのCerebroインスタンスを作成
     cerebro = bt.Cerebro()
 
-    # 戦略の選択
+    # ロガーを戦略に渡す
+    strategy_params = {'lot_size': lot_size, 'logger': log}
+
+    # 戦略の選択と追加
     strategy_name = ""
     if strategy_type == 'tr':
-        cerebro.addstrategy(TrendFollowingStrategy, lot_size=lot_size)
+        cerebro.addstrategy(TrendFollowingStrategy, **strategy_params)
         strategy_name = "trend"
     elif strategy_type == 're':
-        cerebro.addstrategy(ReverseStrategy, lot_size=lot_size)
+        cerebro.addstrategy(ReverseStrategy, **strategy_params)
         strategy_name = "reverse"
     elif strategy_type == 'bo':
-        cerebro.addstrategy(BreakoutStrategy, lot_size=lot_size)
+        cerebro.addstrategy(BreakoutStrategy, **strategy_params)
         strategy_name = "breakout"
+    elif strategy_type == 'ma_rsi': # 新しい戦略を追加
+        cerebro.addstrategy(MASmaRsiStrategy, **strategy_params)
+        strategy_name = "ma_rsi"
+    elif strategy_type == 'bb_macd': # 新しい戦略を追加
+        cerebro.addstrategy(BollingerMacdStrategy, **strategy_params)
+        strategy_name = "bb_macd"
     else:
+        log.error(f"不明な戦略タイプです: {strategy_type}")
         raise ValueError("不明な戦略タイプです。")
 
     # データフィードの作成
     data_feed = bt.feeds.PandasData(dataname=data_df)
     cerebro.adddata(data_feed)
 
-    # 初期キャッシュ設定（100万円）
-    cerebro.broker.setcash(1000000.0)
+    # 初期キャッシュ設定
+    cerebro.broker.setcash(initial_capital) # initial_capital を使用
 
     # バックテスト実行
     strategies = cerebro.run()
@@ -564,7 +932,7 @@ def run_multiple_backtests(symbol: str, industry_name: str, strategies=None, per
     Args:
       symbol: 銘柄シンボル
       industry_name: 業種名
-      strategies: 戦略のリスト（デフォルト: ['tr', 're', 'bo']）
+      strategies: 戦略のリスト（デフォルト: ['tr', 're', 'bo', 'ma_rsi', 'bb_macd']）
       periods: 期間のリスト（デフォルト: 5年前から現在、1年前から現在、2年前から1年前）
       logger: ロガーインスタンス（デフォルト: None）
       
@@ -575,7 +943,7 @@ def run_multiple_backtests(symbol: str, industry_name: str, strategies=None, per
     log = logger or logging.getLogger(__name__)
     
     if strategies is None:
-        strategies = ['tr', 're', 'bo']
+        strategies = ['tr', 're', 'bo', 'ma_rsi', 'bb_macd'] # デフォルトに新しい戦略を追加
     
     if periods is None:
         today = datetime.date.today()
@@ -595,14 +963,17 @@ def run_multiple_backtests(symbol: str, industry_name: str, strategies=None, per
     for strategy in strategies:
         for start_date, end_date in periods:
             try:
+                # run_backtestを呼び出す際にloggerを渡す
                 result = run_backtest(symbol, start_date, end_date, strategy, logger=log)
                 if result:
                     results.append(result)
+                    return_percentage = result.get('return_percentage', 0)
+                    log.info(f"バックテスト結果: 戦略={strategy}, 期間={start_date}～{end_date}, リターン={return_percentage:.2f}%")
+                else:
+                    log.warning(f"バックテスト失敗: 戦略={strategy}, 期間={start_date}～{end_date}")
+                            
             except Exception as e:
-                import traceback
-                error_detail = traceback.format_exc()
-                log.error(f"バックテスト実行エラー: 銘柄={symbol}, 戦略={strategy}, 期間={start_date}～{end_date}, エラー={e}")
-                log.error(f"詳細なエラー情報: {error_detail}")
+                log.error(f"戦略 {strategy} のバックテスト中にエラー: {e}", exc_info=True)
     
     return results
 
@@ -625,7 +996,7 @@ class BacktestService:
             industry_name (str): 英語の業種名（テーブル接頭辞）
             start_date (str): 開始日（YYYY-MM-DD形式）
             end_date (str): 終了日（YYYY-MM-DD形式）
-            strategy_type (str): 戦略タイプ（'tr'=トレンド, 're'=逆張り, 'bo'=ブレイクアウト）
+            strategy_type (str): 戦略タイプ（'tr', 're', 'bo', 'ma_rsi', 'bb_macd'）
             initial_funds (int): 初期資金
             lot_size (int): 取引単位（株数）
             
@@ -670,13 +1041,20 @@ class BacktestService:
             data = bt.feeds.PandasData(dataname=df)
             cerebro.adddata(data)
             
+            # ロガーを戦略に渡す
+            strategy_params = {'lot_size': lot_size, 'logger': self.logger}
+            
             # 戦略の追加
             if strategy_type == 'tr':
-                cerebro.addstrategy(TrendFollowingStrategy, lot_size=lot_size)
+                cerebro.addstrategy(TrendFollowingStrategy, **strategy_params)
             elif strategy_type == 're':
-                cerebro.addstrategy(ReverseStrategy, lot_size=lot_size)
+                cerebro.addstrategy(ReverseStrategy, **strategy_params)
             elif strategy_type == 'bo':
-                cerebro.addstrategy(BreakoutStrategy, lot_size=lot_size)
+                cerebro.addstrategy(BreakoutStrategy, **strategy_params)
+            elif strategy_type == 'ma_rsi': # 新しい戦略を追加
+                cerebro.addstrategy(MASmaRsiStrategy, **strategy_params)
+            elif strategy_type == 'bb_macd': # 新しい戦略を追加
+                cerebro.addstrategy(BollingerMacdStrategy, **strategy_params)
             else:
                 self.logger.error(f"不明な戦略タイプ: {strategy_type}")
                 return None
@@ -700,11 +1078,13 @@ class BacktestService:
             # 取引履歴
             trades = strategy.trades
             
-            # 戦略名称マッピング
+            # 戦略名称マッピングを更新
             strategy_names = {
                 'tr': 'trend',
                 're': 'reverse',
-                'bo': 'breakout'
+                'bo': 'breakout',
+                'ma_rsi': 'ma_rsi',
+                'bb_macd': 'bb_macd'
             }
             
             # strategy.statsのアクセス方法を修正
@@ -730,7 +1110,7 @@ class BacktestService:
             
             backtest_result = {
                 'code': code,
-                'strategy': strategy_names.get(strategy_type, strategy_type),
+                'strategy': strategy_names.get(strategy_type, strategy_type), # 更新されたマッピングを使用
                 'start_date': start_date,
                 'end_date': end_date,
                 'initial_funds': initial_funds,
@@ -766,8 +1146,8 @@ class BacktestService:
         try:
             self.logger.info(f"複数戦略バックテスト開始: 銘柄={code}, 業種={industry_name}, 期間={period_years}年")
             
-            # 戦略リスト
-            strategies = ['tr', 're', 'bo']  # トレンドフォロー、逆張り、ブレイクアウト
+            # 戦略リストを更新
+            strategies = ['tr', 're', 'bo', 'ma_rsi', 'bb_macd']
             self.logger.info(f"実行戦略: {', '.join(strategies)}")
             
             # 期間の設定
@@ -811,12 +1191,12 @@ class BacktestService:
                         if result:
                             results.append(result)
                             return_percentage = result.get('return_percentage', 0)
-                            self.logger.info(f"バックテスト結果: 戦略={strategy}, 期間={start_date}～{end_date}, リターン={return_percentage:.2f}%")
+                            log.info(f"バックテスト結果: 戦略={strategy}, 期間={start_date}～{end_date}, リターン={return_percentage:.2f}%")
                         else:
-                            self.logger.warning(f"バックテスト失敗: 戦略={strategy}, 期間={start_date}～{end_date}")
+                            log.warning(f"バックテスト失敗: 戦略={strategy}, 期間={start_date}～{end_date}")
                             
                     except Exception as e:
-                        self.logger.error(f"戦略 {strategy} のバックテスト中にエラー: {e}", exc_info=True)
+                        log.error(f"戦略 {strategy} のバックテスト中にエラー: {e}", exc_info=True)
             
             self.logger.info(f"複数戦略バックテスト完了: 成功={len(results)}件")
             return results
