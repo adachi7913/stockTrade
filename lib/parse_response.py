@@ -267,7 +267,7 @@ def parse_response(full_data, response, code=None, logger=None):
             return None
 
         insert_data = {
-            "date": full_data[-1]["date"] if full_data and len(full_data) > 0 else datetime.now().strftime('%Y%m%d'),
+            "date": datetime.now().strftime('%Y-%m-%d'),
             "code": stock_code,
             "close": full_data[-1]["close"] if full_data and len(full_data) > 0 and "close" in full_data[-1] else 0,
             "rule_entry_price": rule_entry_price,

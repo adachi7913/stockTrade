@@ -80,31 +80,31 @@ def filter_stock(stock_code, close, market_cap, logger, last_no_entry_date=None,
             return False
 
     # ATRフィルター：ATR比率（atr/close）が5%以上の場合エントリー見送り
-    if atr is not None and close_float > 0:
-         atr_ratio = atr / close_float
-         if atr_ratio >= 0.05:
-              logger.info(f"{stock_code}: ATR比率が {atr_ratio*100:.1f}% となり急激な値動きがあるため除外")
-              return False
+    # if atr is not None and close_float > 0:
+    #      atr_ratio = atr / close_float
+    #      if atr_ratio >= 0.05:
+    #           logger.info(f"{stock_code}: ATR比率が {atr_ratio*100:.1f}% となり急激な値動きがあるため除外")
+    #           return False
 
     # RSIフィルター：RSIが25以下の場合、過冷状態のためエントリー見送り
-    if rsi is not None:
-         if rsi <= 25:
-              logger.info(f"{stock_code}: RSIが {rsi} で過冷状態（売られ過ぎ）のため除外")
-              return False
+    # if rsi is not None:
+    #      if rsi <= 25:
+    #           logger.info(f"{stock_code}: RSIが {rsi} で過冷状態（売られ過ぎ）のため除外")
+    #           return False
 
     # ストキャスティクスフィルター：%Kが20以下の場合、過冷状態のためエントリー見送り
-    if stoch_k is not None:
-         # ストキャスティクスが0の場合は、計算エラーの可能性があるため、別の条件でチェック
-         if stoch_k == 0:
-             logger.debug(f"{stock_code}: ストキャスティクス%Kが0です。計算の問題の可能性があるため、他の指標で判断します。")
-             # 0の場合はRSIと合わせて判断
-             if rsi is not None and rsi <= 30:
-                 logger.info(f"{stock_code}: ストキャスティクス%Kが0で、RSIも{rsi}と低いため除外")
-                 return False
-         # 通常の過冷状態チェック（0より大きく20以下）
-         elif 0 < stoch_k <= 20:
-             logger.info(f"{stock_code}: ストキャスティクス%Kが {stoch_k} で過冷状態のため除外")
-             return False
+    # if stoch_k is not None:
+    #      # ストキャスティクスが0の場合は、計算エラーの可能性があるため、別の条件でチェック
+    #      if stoch_k == 0:
+    #          logger.debug(f"{stock_code}: ストキャスティクス%Kが0です。計算の問題の可能性があるため、他の指標で判断します。")
+    #          # 0の場合はRSIと合わせて判断
+    #          if rsi is not None and rsi <= 30:
+    #              logger.info(f"{stock_code}: ストキャスティクス%Kが0で、RSIも{rsi}と低いため除外")
+    #              return False
+    #      # 通常の過冷状態チェック（0より大きく20以下）
+    #      elif 0 < stoch_k <= 20:
+    #          logger.info(f"{stock_code}: ストキャスティクス%Kが {stoch_k} で過冷状態のため除外")
+    #          return False
 
     logger.info(f"{stock_code}: 全てのフィルタ条件を満たしています。")
     return True
@@ -141,50 +141,54 @@ def calculate_entry_score(stock_data, backtest_results, technical_indicators, lo
     # バックテスト結果のスコアリング（40点）
     # ----------------
     if backtest_results and 'success_rate' in backtest_results and 'average_return' in backtest_results:
-        # 勝率スコア (0-20点)
+        # 勝率スコア (0-15点) - 少し比重を下げる
         success_rate = backtest_results.get('success_rate', 0)
-        success_score = min(20, success_rate / 5)  # 勝率100%で最大20点
+        success_score = min(15, max(0, success_rate / 6.67))  # 勝率100%で15点
         scores['success_rate'] = success_score
         total_score += success_score
-        max_score += 20
+        max_score += 15
         
-        # 平均リターンスコア (0-20点)
+        # 平均リターンスコア (0-25点) - 少し比重を上げる
         avg_return = backtest_results.get('average_return', 0)
-        return_score = min(20, max(0, avg_return * 20))  # 平均リターン1.0で最大20点
+        # 平均リターンがプラスの場合に点数を与える。例えば0.5で12.5点、1.0で25点
+        return_score = min(25, max(0, avg_return * 25))
         scores['average_return'] = return_score
         total_score += return_score
-        max_score += 20
+        max_score += 25
     else:
         logger.warning(f"{stock_code}: バックテスト結果が不足しているため、スコアリングに影響します")
+        max_score += 40 # バックテスト結果がない場合は、最大スコアの分母だけ増やす
     
     # ----------------
     # テクニカル指標のスコアリング（35点）
     # ----------------
     if technical_indicators:
-        # RSIスコア (0-10点): 50-70が最適範囲
+        # RSIスコア (0-10点): 30以下または70以上でも少し点を与える
         rsi = technical_indicators.get('rsi')
         if rsi is not None:
-            if 50 <= rsi <= 70:
+            if 40 <= rsi <= 60: # 最適範囲を少し狭める
                 rsi_score = 10
-            elif 40 <= rsi < 50 or 70 < rsi <= 80:
+            elif 30 <= rsi < 40 or 60 < rsi <= 70:
                 rsi_score = 7
-            elif 30 <= rsi < 40 or 80 < rsi <= 90:
-                rsi_score = 3
+            elif 20 <= rsi < 30 or 70 < rsi <= 80: # 売られすぎ/買われすぎの領域にも少し点数
+                rsi_score = 4
             else:
-                rsi_score = 0
+                rsi_score = 1 # 極端な場合でも最低1点
             scores['rsi'] = rsi_score
             total_score += rsi_score
             max_score += 10
         
-        # ストキャスティクス%Kスコア (0-7点): 40-80が最適範囲
+        # ストキャスティクス%Kスコア (0-7点): 20以下または80以上でも少し点を与える
         stoch_k = technical_indicators.get('stoch_k')
         if stoch_k is not None:
-            if 40 <= stoch_k <= 80:
+            if 30 <= stoch_k <= 70: # 最適範囲を広げる
                 stoch_score = 7
-            elif 20 <= stoch_k < 40 or 80 < stoch_k <= 90:
-                stoch_score = 3
+            elif 20 <= stoch_k < 30 or 70 < stoch_k <= 80:
+                stoch_score = 4
+            elif 10 <= stoch_k < 20 or 80 < stoch_k <= 90: # 売られすぎ/買われすぎの領域にも少し点数
+                stoch_score = 2
             else:
-                stoch_score = 0
+                stoch_score = 0 # 極端な場合は0点
             scores['stoch_k'] = stoch_score
             total_score += stoch_score
             max_score += 7
@@ -204,7 +208,7 @@ def calculate_entry_score(stock_data, backtest_results, technical_indicators, lo
             total_score += trend_score
             max_score += 10
         
-        # ボリンジャーバンド位置 (0-8点)
+        # ボリンジャーバンド位置 (0-8点) - バンド付近でも点を与える
         close = stock_data.get('close', 0)
         bb_lower = technical_indicators.get('bb_lower')
         bb_middle = technical_indicators.get('bb_middle')
@@ -222,21 +226,25 @@ def calculate_entry_score(stock_data, backtest_results, technical_indicators, lo
                 if bb_upper_float > bb_lower_float:  # 分母がゼロにならないことを確認
                     bb_position = (close_float - bb_lower_float) / (bb_upper_float - bb_lower_float)
                     
-                    # 理想的な位置は0.3〜0.5（やや下方から中央）
-                    if 0.3 <= bb_position <= 0.5:
-                        bb_score = 8
-                    elif 0.1 <= bb_position < 0.3 or 0.5 < bb_position <= 0.7:
-                        bb_score = 4
-                    else:
-                        bb_score = 0
+                    # 評価範囲を拡大: 中央(0.5)に近いほど高得点、バンド付近でも点数を与える
+                    if 0.4 <= bb_position <= 0.6:
+                        bb_score = 8 # 中央付近
+                    elif 0.2 <= bb_position < 0.4 or 0.6 < bb_position <= 0.8:
+                        bb_score = 5 # 中央からやや離れる
+                    elif 0.0 <= bb_position < 0.2 or 0.8 < bb_position <= 1.0:
+                        bb_score = 2 # バンド付近
+                    else: 
+                        bb_score = 0 # バンド外 (基本的にはないはずだが)
                     
                     scores['bb_position'] = bb_score
                     total_score += bb_score
                     max_score += 8
             except (ValueError, TypeError) as e:
                 logger.error(f"{stock_code}: ボリンジャーバンド計算中にエラー: {e}")
+                max_score += 8 # エラー時は分母だけ増やす
     else:
         logger.warning(f"{stock_code}: テクニカル指標が不足しているため、スコアリングに影響します")
+        max_score += 35 # テクニカル指標がない場合は分母だけ増やす
     
     # ----------------
     # 保有期間と期待リターンのスコアリング（25点）

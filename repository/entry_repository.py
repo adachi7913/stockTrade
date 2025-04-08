@@ -56,6 +56,7 @@ class EntryRepository(BaseRepository):
                 WHERE e.code = a.code 
                 AND e.status = 'active'
             )
+            AND a.date = CURRENT_DATE
             ORDER BY CASE 
                 WHEN a.rule_period ~ E'^\\d+$' AND CAST(a.rule_period AS INTEGER) > 0 
                 THEN CAST(a.expected_return AS NUMERIC) / CAST(a.rule_period AS INTEGER) 
@@ -990,6 +991,7 @@ class EntryRepository(BaseRepository):
             FROM api_response a
             LEFT JOIN entries e ON a.code = e.code AND e.status = 'active'
             WHERE a.entry_score >= %s
+            AND a.date = CURRENT_DATE
             ORDER BY CASE 
                 WHEN a.rule_period ~ E'^\\d+$' AND CAST(a.rule_period AS INTEGER) > 0 
                 THEN CAST(a.expected_return AS NUMERIC) / CAST(a.rule_period AS INTEGER) 
