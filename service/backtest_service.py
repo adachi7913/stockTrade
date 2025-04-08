@@ -543,7 +543,7 @@ class MASmaRsiStrategy(bt.Strategy):
             time_limit = self.params.time_limit_days
 
             # 詳細ログを追加 (INFOレベル)
-            self.log(f"Exit Check: SMACrossDown={sma_cross_down_val < 0}, RSICrossHigh={rsi_cross_down_high_val < 0} (RSI={current_rsi:.2f}), SLHit={current_close <= stop_loss_price if stop_loss_price else False} (Close={current_close:.2f}, SL={f'{stop_loss_price:.2f}' if stop_loss_price else 'N/A'}), TimeLimitHit={bars_held >= time_limit} (Held={bars_held}, Limit={time_limit})")
+            # self.log(f"Exit Check: SMACrossDown={sma_cross_down_val < 0}, RSICrossHigh={rsi_cross_down_high_val < 0} (RSI={current_rsi:.2f}), SLHit={current_close <= stop_loss_price if stop_loss_price else False} (Close={current_close:.2f}, SL={f'{stop_loss_price:.2f}' if stop_loss_price else 'N/A'}), TimeLimitHit={bars_held >= time_limit} (Held={bars_held}, Limit={time_limit})")
 
 
             # 1. 利確 (デッドクロス)
@@ -692,7 +692,7 @@ class BollingerMacdStrategy(bt.Strategy):
             is_macd_buy_signal = macd_cross_over_val > 0 and macd_val > 0
 
             # 詳細ログを追加 (INFOレベル)
-            self.log(f"Entry Check: LongTrendUp={is_long_trend_up}, BBLowTouch={is_touching_lower_band} (Close={current_close:.2f}, BB Low={bb_lower:.2f}), MACDBuy(ignored)={is_macd_buy_signal} (Cross={macd_cross_over_val > 0}, MACD={macd_val:.2f})")
+            # self.log(f"Entry Check: LongTrendUp={is_long_trend_up}, BBLowTouch={is_touching_lower_band} (Close={current_close:.2f}, BB Low={bb_lower:.2f}), MACDBuy(ignored)={is_macd_buy_signal} (Cross={macd_cross_over_val > 0}, MACD={macd_val:.2f})")
 
             # エントリーシグナル
             entry_signal = is_long_trend_up and is_touching_lower_band
@@ -721,7 +721,7 @@ class BollingerMacdStrategy(bt.Strategy):
             time_limit = self.params.time_limit_days
 
             # 詳細ログを追加 (INFOレベル)
-            self.log(f"Exit Check: BBUpTouch={current_close >= bb_upper} (Close={current_close:.2f}, BB Up={bb_upper:.2f}), MACDCrossDown={macd_cross_down_val < 0}, SLHit={current_close <= stop_loss_price if stop_loss_price else False} (Close={current_close:.2f}, SL={f'{stop_loss_price:.2f}' if stop_loss_price else 'N/A'}), TimeLimitHit={bars_held >= time_limit} (Held={bars_held}, Limit={time_limit})")
+            # self.log(f"Exit Check: BBUpTouch={current_close >= bb_upper} (Close={current_close:.2f}, BB Up={bb_upper:.2f}), MACDCrossDown={macd_cross_down_val < 0}, SLHit={current_close <= stop_loss_price if stop_loss_price else False} (Close={current_close:.2f}, SL={f'{stop_loss_price:.2f}' if stop_loss_price else 'N/A'}), TimeLimitHit={bars_held >= time_limit} (Held={bars_held}, Limit={time_limit})")
 
 
             # 1. 利確 (BB上限タッチ)
