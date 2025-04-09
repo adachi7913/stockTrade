@@ -57,7 +57,7 @@ class AutoSellStock:
         evaluation_results = {}
         
         # 2-4. 各保有証券について評価を実行
-        for code, current_price in holdings.items():
+        for code, holding_info in holdings.items(): # holdings now includes position
             self.logger.info(f"証券コード {code} の評価を開始")
             
             # 過去の価格とインジケーターを取得
@@ -66,7 +66,7 @@ class AutoSellStock:
                 continue
             
             # 評価を実行
-            evaluation = self.evaluate_holding_with_ai(code, current_price, historical_data)
+            evaluation = self.evaluate_holding_with_ai(code, holding_info['current_price'], holding_info['position'], historical_data) # Pass position
             if evaluation:
                 evaluation_results[code] = evaluation
                 
@@ -174,16 +174,17 @@ class AutoSellStock:
                 target_price="NG"
             )
 
-    def get_holdings(self) -> Optional[Dict[str, str]]:
+    def get_holdings(self) -> Optional[Dict[str, Dict[str, str]]]: # Return type updated
         """
-        entriesテーブルから保有証券の情報を取得
+        entriesテーブルから保有証券の情報を取得 (position含む)
         
         Returns:
-            Dict[str, str]: {証券コード: 現在価格} の形式、取得失敗時はNone
+            Dict[str, Dict[str, str]]: {証券コード: {'current_price': 価格, 'position': ポジション}} の形式、取得失敗時はNone
         """
         self.logger.info("保有証券情報の取得を開始")
         
-        holdings = self.stock_repository.get_active_holdings(is_test=self.test_mode)
+        # positionも取得するように修正が必要 (StockRepository側)
+        holdings = self.stock_repository.get_active_holdings(is_test=self.test_mode) 
         
         if holdings is None:
             self.logger.error("保有証券情報の取得に失敗しました")
@@ -193,7 +194,7 @@ class AutoSellStock:
             self.logger.info("保有証券が見つかりません")
             return {}
         
-        self.logger.info(f"取得した保有証券: {holdings}")
+        self.logger.info(f"取得した保有証券 (ポジション含む): {holdings}")
         return holdings
 
     def get_stock_data(self, code: str) -> Optional[List[dict]]:
@@ -283,13 +284,14 @@ class AutoSellStock:
             self.logger.error(f"評価結果の比較・更新中にエラーが発生: {e}")
             return current
 
-    def evaluate_holding_with_ai(self, code: str, current_price: str, historical_data: List[dict]) -> Optional[EvaluationResult]:
+    def evaluate_holding_with_ai(self, code: str, current_price: str, position: str, historical_data: List[dict]) -> Optional[EvaluationResult]:
         """
         GeminiAPIを使用して保有株式を評価
         
         Args:
             code (str): 証券コード
             current_price (str): 現在価格
+            position (str): ポジション
             historical_data (List[dict]): 過去の価格とインジケーターのデータ
             
         Returns:
@@ -318,6 +320,7 @@ class AutoSellStock:
             【提供データ】
             証券コード: {code}
             現在価格: {current_price}
+            ポジション: {position}
             過去データ: {json_dumps(historical_data, ensure_ascii=False)}
             前回の評価結果: {previous_evaluation_json}
 
@@ -532,7 +535,7 @@ def main():
                 continue
                 
             # 2. 評価を実行
-            evaluation = auto_sell.evaluate_holding_with_ai(code, current_price, historical_data)
+            evaluation = auto_sell.evaluate_holding_with_ai(code, current_price, holdings[code]['position'], historical_data)
             if not evaluation:
                 logger.error(f"証券コード {code} の評価に失敗しました")
                 continue
