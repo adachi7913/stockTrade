@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: 業種名取得時の注意
 globs: 
 alwaysApply: false
