@@ -1344,43 +1344,46 @@ class StockRepository(BaseRepository):
             self.logger.error(f"インジケーターデータの取得中にエラーが発生しました: {e}", exc_info=True)
             return []
 
-    def get_active_holdings(self, is_test: bool = False) -> Optional[Dict[str, str]]:
+    def get_active_holdings(self, is_test: bool = False) -> Optional[Dict[str, Dict[str, str]]]:
         """
-        entriesテーブルからアクティブな保有証券情報を取得
-        
+        entriesテーブルからアクティブな保有証券の情報（価格とポジション）を取得します
+
         Args:
-            is_test (bool): テストモードかどうか
-            
+            is_test (bool): テストモードフラグ
+
         Returns:
-            Dict[str, str]: {証券コード: 現在価格} の形式、取得失敗時はNone
+            Optional[Dict[str, Dict[str, str]]]: {証券コード: {'current_price': 価格, 'position': ポジション}} の形式、取得失敗時はNone
         """
         try:
             query = """
-                SELECT e.code, sp.close as current_price
-                FROM entries e
-                JOIN (
-                    SELECT code, close, date
-                    FROM all_stock_prices
-                    WHERE date = (SELECT MAX(date) FROM all_stock_prices)
-                ) sp ON e.code = sp.code
-                WHERE e.status = 'active' 
-                AND e.is_test = %s
-                AND e.entry_date < CURRENT_DATE
+            SELECT
+                e.code,
+                e.entry_price, -- または最新価格を取得するロジックが必要かもしれない
+                e.position     -- position カラムを取得
+            FROM entries e
+            WHERE e.status = 'active'
+            AND e.is_test = %s;
             """
-            
-            with self.get_connection() as conn:
-                with conn.cursor() as cur:  # 通常のカーソルを使用
-                    cur.execute(query, (is_test,))
-                    results = cur.fetchall()
-                    
-                    if not results:
-                        return {}
-                        
-                    # タプルの添字でアクセス（0:code, 1:current_price）
-                    return {row[0]: str(row[1]) for row in results}
-                    
+            self.cur.execute(query, (is_test,))
+            rows = self.cur.fetchall()
+
+            if not rows:
+                return {}
+
+            # 返り値の形式を {コード: {'current_price': 価格, 'position': ポジション}} に変更
+            holdings = {}
+            for row in rows:
+                code = row[0]
+                # entry_price を 'current_price' として使うか、別途最新価格を取得するか要検討
+                # ここでは一旦 entry_price を使う
+                current_price = str(row[1]) # DECIMAL を文字列に変換
+                position = row[2]
+                holdings[code] = {'current_price': current_price, 'position': position}
+
+            return holdings
+
         except Exception as e:
-            self.logger.error(f"保有証券情報の取得に失敗: {e}")
+            self.logger.error(f"アクティブな保有証券取得エラー: {e}")
             return None
 
     def get_previous_evaluation(self, code: str) -> Optional[Dict[str, Any]]:
