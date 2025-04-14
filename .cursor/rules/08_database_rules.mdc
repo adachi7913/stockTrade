@@ -1,7 +1,7 @@
 ---
 description: 
-globs: 
-alwaysApply: true
+globs: *repository.py
+alwaysApply: false
 ---
 # stockTradeプロジェクトのデータベーススキーマ
 

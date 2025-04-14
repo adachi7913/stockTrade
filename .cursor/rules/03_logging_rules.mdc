@@ -1,9 +1,13 @@
 ---
+description: 
+globs: 
+alwaysApply: true
+---
+---
 description: ログ設定ルール
 globs: 
 alwaysApply: false
---- 
-
+---
 # ロギング設定ルール
 
 ## 基本方針
@@ -11,7 +15,7 @@ alwaysApply: false
 - ログレベルを適切に使い分け（DEBUG, INFO, WARNING, ERROR）
 - 重要な操作やエラーは常にログに記録
 - 機密情報はログに出力しない
-- `utils.logging_config`モジュールを使用して統一的なログ設定 
+- `utils.logging_config`モジュールを使用して統一的なログ設定
 
 ## 詳細ルール
 
@@ -57,7 +61,7 @@ alwaysApply: false
   ```python
   logger.setLevel(logging.DEBUG)
   logging.getLogger('module_name').setLevel(logging.DEBUG)
-  ``` 
+  ```
 
 ## 実装例
 
@@ -85,4 +89,4 @@ def main():
         logger.info("処理を終了します")
 
 # 古いログのクリーンアップ（必要に応じて）
-cleanup_old_logs("module_name")
+cleanup_old_logs("module_name") 
