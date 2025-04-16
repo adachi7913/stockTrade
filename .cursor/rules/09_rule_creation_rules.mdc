@@ -1,0 +1,48 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: ルール作成・編集時のフロー
+globs: 
+alwaysApply: true
+--- 
+
+# ルール作成・編集フロー
+
+.cursor/rules 配下のルールファイル (.mdc) を作成・編集する際は、以下のフローを遵守してください。
+
+**重要:** AI は `.cursor/rules` 配下のファイルを直接編集できません。必ず `temp_rules` ディレクトリと同期スクリプト (`scripts/sync_rules.py`) を使用してください。 
+
+## 新規ルール作成時
+
+1.  **ディレクトリ作成:**
+    -   `temp_rules` ディレクトリ配下に、新しいルールに対応する番号付きのサブディレクトリを作成します (例: `temp_rules/10_new_feature_rules`)。
+2.  **メタデータファイル作成:**
+    -   作成したサブディレクトリ配下に `_metadata.md` ファイルを作成し、ルール名 (`description`) や適用条件 (`globs`, `alwaysApply`) を記述します。
+    ```markdown
+    ---
+    description: 新しい機能のルール
+    globs: ["src/new_feature/**/*.py"] # 任意
+    alwaysApply: false # または true
+    ---
+    ```
+3.  **コンテンツファイル作成:**
+    -   サブディレクトリ配下に、ルール内容を記述した番号付きの `.md` ファイルを作成します (例: `01_overview.md`, `02_usage.md`)。ファイル名は内容がわかるように付け、必要に応じてセクション (`##`) で区切ります。
+4.  **同期スクリプト実行:**
+    -   ワークスペースのルートディレクトリから `python scripts/sync_rules.py <ルールディレクトリ名>` を実行し、`.mdc` ファイルを生成します (例: `python scripts/sync_rules.py 10_new_feature_rules`)。
+5.  **確認:**
+    -   生成された `.cursor/rules/<ルール名>.mdc` ファイルの内容を確認し、意図通りに生成されているか確認します (特にメタデータの重複がないか、結合順序は正しいかなど)。 
+
+## 既存ルール追記・編集時
+
+1.  **対象ファイル特定:**
+    -   `temp_rules` 配下の、編集したいルールに対応するサブディレクトリを見つけます。
+2.  **ファイル編集/作成:**
+    -   **追記の場合:** 新しい内容を記述した番号付きの `.md` ファイルをサブディレクトリ内に作成します (例: `03_advanced_usage.md`)。ファイル番号は既存のファイルと重複しないようにします。
+    -   **編集の場合:** 既存の `.md` ファイル (または `_metadata.md`) を直接編集します。
+3.  **同期スクリプト実行:**
+    -   ワークスペースのルートディレクトリから `python scripts/sync_rules.py <ルールディレクトリ名>` を実行し、`.mdc` ファイルを更新します (例: `python scripts/sync_rules.py 01_project_overview`)。
+4.  **確認:**
+    -   更新された `.cursor/rules/<ルール名>.mdc` ファイルの内容を確認し、変更が正しく反映されているか確認します。
