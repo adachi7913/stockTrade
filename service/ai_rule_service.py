@@ -12,6 +12,7 @@ from lib.table_category import TableCategory
 from lib.code_validator import validate_stock_code
 from discord.discord_notifier import create_error_message
 from service.backtest_service import run_multiple_backtests
+from utils.chart_generator import create_stock_chart  # チャート生成用関数をインポート
 
 def run_ai_rule_generation(logger=None):
     if logger is None:
@@ -97,17 +98,29 @@ def run_ai_rule_generation(logger=None):
                 
                 # Gemini API呼び出し
                 try:
-                    # .envから取得期間を取得（年数指定。デフォルトは1年*230営業日）
-                    fetch_range = int(os.getenv("FETCH_DATA_RANGE", "1"))*230
-                    logger.info(f"{stock_code}: データ取得期間: {fetch_range}日")
-                    
-                    # 株価履歴とインジケータデータの取得
-                    price_and_indicators = repository.get_stock_full_data_period(code_4digit, industry_name)
-                    if not price_and_indicators:
-                        logger.warning(f"{stock_code}: 株価履歴またはインジケータが取得できませんでした")
+                    # 1. テキスト分析用に1年分のデータを取得（約230日）
+                    logger.info(f"{stock_code}: テキスト分析用データ（1年分）取得開始")
+                    text_data = repository.get_stock_full_data_period(code_4digit, industry_name, fetch_days=230)
+                    if not text_data:
+                        logger.warning(f"{stock_code}: テキスト分析用データが取得できませんでした")
                         return
+                    logger.info(f"{stock_code}: テキスト分析用データ取得完了 - {len(text_data)}件")
+                    
+                    # 2. チャート生成用に5年分のデータを取得（約1150日）
+                    logger.info(f"{stock_code}: チャート生成用データ（5年分）取得開始")
+                    chart_data = repository.get_stock_full_data_period(code_4digit, industry_name, fetch_days=1150)
+                    if not chart_data:
+                        logger.warning(f"{stock_code}: チャート生成用データが取得できませんでした")
+                        return
+                    logger.info(f"{stock_code}: チャート生成用データ取得完了 - {len(chart_data)}件")
+                    
+                    # 3. チャート画像を生成
+                    logger.info(f"{stock_code}: チャート画像生成開始")
+                    chart_title = f"銘柄コード: {code_4digit} - 5年間の価格推移と指標"
+                    chart_image_bytes = create_stock_chart(chart_data, code_4digit, title=chart_title)
+                    logger.info(f"{stock_code}: チャート画像生成完了 - {len(chart_image_bytes)} バイト")
                         
-                    # APIハンドラの初期化 - ここを修正
+                    # APIハンドラの初期化
                     api_key = os.getenv("GEMINI_API_KEY")
                     if not api_key:
                         logger.error("GEMINI_API_KEY が設定されていません")
@@ -118,8 +131,13 @@ def run_ai_rule_generation(logger=None):
                     
                     logger.info(f"Gemini APIリクエスト開始: 銘柄={stock_code}")
                     
-                    # ApiHandlerはpriceデータとバックテスト結果を受け取る
-                    api_handler = ApiHandler(price_and_indicators, backtest_results=backtest_results, logger=logger)
+                    # ApiHandlerはテキストデータ、チャート画像、バックテスト結果を受け取る
+                    api_handler = ApiHandler(
+                        data=text_data, 
+                        backtest_results=backtest_results, 
+                        logger=logger,
+                        chart_image_bytes=chart_image_bytes
+                    )
                     
                     # API呼び出し - パラメータなしでcall_gemini_apiを呼び出す
                     response = api_handler.call_gemini_api()
@@ -130,7 +148,7 @@ def run_ai_rule_generation(logger=None):
                         logger.info(f"Gemini API response: {response}")
                         
                         # レスポンスをDBに保存
-                        parsed_result = parse_response(price_and_indicators, response, code=code_4digit, logger=logger)
+                        parsed_result = parse_response(text_data, response, code=code_4digit, logger=logger)
                         if parsed_result:
                             repository.insert_api_response(parsed_result)
                             logger.info(f"{stock_code}: AIエントリー判断をDBに保存しました")

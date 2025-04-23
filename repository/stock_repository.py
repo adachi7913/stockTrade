@@ -156,21 +156,19 @@ class StockRepository(BaseRepository):
             self.conn.rollback()
             return False
 
-    def get_stock_full_data_period(self, code: str, industry_name: str) -> List[Dict]:
+    def get_stock_full_data_period(self, code: str, industry_name: str, fetch_days: int = 230) -> List[Dict]:
         """
         指定された証券コードの株価データと指標データを取得します
         
         Args:
             code (str): 証券コード（4桁）
             industry_name (str): 業種名
+            fetch_days (int, optional): 取得する日数。デフォルトは230日（約1年）
             
         Returns:
             List[Dict]: 株価データと指標データのリスト
         """
         try:
-            # 環境変数から取得日数を取得
-            fetch_range = int(os.getenv("FETCH_DATA_RANGE", "1"))*230  # 範囲は年数。デフォルトは1年*230営業日
-            
             query = """
             WITH price_data AS (
                 SELECT p.*, 
@@ -189,7 +187,7 @@ class StockRepository(BaseRepository):
             """.format(industry_name, industry_name)
             
             
-            self.cur.execute(query, (code, fetch_range))
+            self.cur.execute(query, (code, fetch_days))
             rows = self.cur.fetchall()
             
             if not rows:
@@ -259,13 +257,14 @@ class StockRepository(BaseRepository):
             self.logger.error(f"時価総額取得エラー: {e}")
             return None
 
-    def get_stock_price_only(self, code: str, industry_name: str) -> List[Dict]:
+    def get_stock_price_only(self, code: str, industry_name: str, fetch_days: int = 230) -> List[Dict]:
         """
         指定された証券コードの株価データのみを取得します
         
         Args:
             code (str): 証券コード（4桁）
             industry_name (str): 業種名
+            fetch_days (int, optional): 取得する日数。デフォルトは230日（約1年）
             
         Returns:
             List[Dict]: 株価データのリスト
@@ -275,18 +274,15 @@ class StockRepository(BaseRepository):
             if not self.is_connected():
                 self.reconnect()
             
-            # 環境変数から取得日数を取得
-            fetch_range = int(os.getenv("FETCH_DATA_RANGE", "1"))*230  # 範囲は年数。デフォルトは1年*230営業日
-            
             query = """
             SELECT code, date, open, high, low, close, volume
             FROM {}_price
             WHERE code = %s
-            AND date BETWEEN (CURRENT_DATE - (%s || ' years')::interval) AND CURRENT_DATE
+            AND date BETWEEN (CURRENT_DATE - (%s || ' days')::interval) AND CURRENT_DATE
             ORDER BY date ASC;
             """.format(industry_name)
             
-            self.cur.execute(query, (code, fetch_range))
+            self.cur.execute(query, (code, fetch_days))
             rows = self.cur.fetchall()
             
             if not rows:

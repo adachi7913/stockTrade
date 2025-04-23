@@ -188,11 +188,12 @@ class ApiHandler:
         self.logger.debug(f"生成されたプロンプトのサイズ: {len(prompt)}バイト")
         return prompt
 
-    def __init__(self, data, prompt=None, backtest_results=None, logger=None):
+    def __init__(self, data, prompt=None, backtest_results=None, logger=None, chart_image_bytes=None):
         self.data = data
         self.backtest_results = backtest_results or []
         self.logger = logger if logger else logging.getLogger(__name__) # ★ ロガーのデフォルト名を修正
         self.prompt = prompt if prompt else self.get_prompt()
+        self.chart_image_bytes = chart_image_bytes
 
         # ★ APIキーの設定とモデルの初期化を追加
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -296,7 +297,7 @@ class ApiHandler:
         self.logger.error("有効なJSON形式が見つかりませんでした")
         return None
 
-    def call_gemini_api(self, prompt=None, temperature=0.5, top_k=3, top_p=0.9, max_output_tokens=4096, safety_filter=None, stock_code=None, retry_count=0):
+    def call_gemini_api(self, prompt=None, temperature=0, top_k=3, top_p=0.9, max_output_tokens=4096, safety_filter=None, stock_code=None, retry_count=0):
         """
         Gemini APIを呼び出してテキスト生成を行い、JSONレスポンスを取得します
         
@@ -343,11 +344,48 @@ class ApiHandler:
             if safety_filter:
                 safety_settings = safety_filter
 
-            response = self.model.generate_content(
-                prompt,
-                generation_config=generation_config,
-                safety_settings=safety_settings
-            )
+            # チャート画像がある場合はマルチモーダル入力を構築
+            if self.chart_image_bytes:
+                self.logger.info("チャート画像を含むマルチモーダル入力を使用します")
+                
+                # チャート画像に関する追加情報をプロンプトに追加
+                chart_prompt = """
+                【チャート画像の分析】
+                添付された5年分のチャート画像も分析してください。チャート画像には株価の推移と主要テクニカル指標が含まれています。
+                - 長期的な価格パターンとトレンド
+                - サポート/レジスタンスラインの形成
+                - 重要な価格変動ポイント
+                - 各テクニカル指標の履歴パターン
+                
+                提供されたテキストデータ（約1年分）と画像データ（5年分）の両方を考慮して分析を行ってください。
+                過去のパターンが現在の状況にどのように関連しているかを検討し、長期的な視点からの判断も含めてください。
+                """
+                
+                # マルチモーダル入力の構築
+                import google.generativeai as genai
+                
+                # チャート画像をPart(content_parts)として準備
+                chart_part = genai.types.Blob(
+                    mime_type="image/png",
+                    data=self.chart_image_bytes
+                )
+                
+                # プロンプト全体を構築（チャート画像の分析指示を追加）
+                full_prompt = prompt + chart_prompt
+                
+                # マルチモーダルリクエストの作成
+                response = self.model.generate_content(
+                    [full_prompt, chart_part],
+                    generation_config=generation_config,
+                    safety_settings=safety_settings
+                )
+            else:
+                # 通常のテキストのみのリクエスト
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=generation_config,
+                    safety_settings=safety_settings
+                )
             
             # レスポンス情報のログ記録
             if hasattr(response, 'candidates') and response.candidates:
