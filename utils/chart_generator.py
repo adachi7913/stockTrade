@@ -106,10 +106,13 @@ def create_stock_chart(data: List[Dict], code: str, title: Optional[str] = None)
     # グラフ3: MACD
     ax3 = plt.subplot2grid((6, 1), (3, 0), rowspan=1, sharex=ax1)
     if 'macd' in df.columns and not df['macd'].isnull().all():
+        # macd列をfloat型に変換
+        df['macd'] = df['macd'].astype(float)
         # シグナルラインとヒストグラムはデータになければ計算
         if 'macd_signal' not in df.columns:
             df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
         if 'macd_hist' not in df.columns:
+            # float型に変換したmacd列を使用
             df['macd_hist'] = df['macd'] - df['macd_signal']
         
         ax3.plot(df.index, df.macd, 'b-', label='MACD')

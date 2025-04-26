@@ -65,23 +65,78 @@ def run_ai_rule_generation(logger=None):
                     logger.warning(f"{stock_code}: 株価情報がありません")
                     return
 
-                # フィルタリング 1: 株価が100円以上5000円以下
+                # フィルタリング 1: 株価が500円以上4000円以下 (変更)
                 close_price = float(latest_price['close'])
-                if close_price < 100:
-                    logger.info(f"{stock_code}: 終値 {close_price} 円 は最低価格 100 円以上の条件を満たしていません。")
+                if close_price < 500: # 100円 -> 500円 に変更
+                    logger.info(f"{stock_code}: 終値 {close_price:,.0f} 円 は最低価格 500 円以上の条件を満たしていません。")
                     return
-                if close_price > 5000:
-                    logger.info(f"{stock_code}: 終値 {close_price} 円 は 5000 円以下の条件を満たしていません。")
-                    return
-
-                # フィルタリング 2: 平均出来高代金が一定以上 (5000万円)
-                avg_volume = repository.get_average_volume(code_4digit, industry_name, days=15)
-                avg_trading_value = avg_volume * close_price
-                if avg_trading_value < 50000000: # 5000万円未満はスキップ
-                    logger.info(f"{stock_code}: 過去15日の平均出来高代金が5000万円未満（{avg_trading_value:,.0f}円）のため除外")
+                if close_price > 4000: # 5000円 -> 4000円 に変更
+                    logger.info(f"{stock_code}: 終値 {close_price:,.0f} 円 は 4000 円以下の条件を満たしていません。")
                     return
 
-                # フィルタリング 3: ストップ高・ストップ安が続いていないか ← このフィルタは削除
+                # フィルタリング 2: 平均出来高代金が一定以上 (1億円) (変更)
+                avg_volume_15 = repository.get_average_volume(code_4digit, industry_name, days=15)
+                avg_trading_value_15 = avg_volume_15 * close_price
+                min_avg_trading_value = 100_000_000 # 5000万円 -> 1億円 に変更
+                if avg_trading_value_15 < min_avg_trading_value:
+                    logger.info(f"{stock_code}: 過去15日の平均出来高代金が {min_avg_trading_value / 10000:,.0f} 万円未満（{avg_trading_value_15:,.0f}円）のため除外")
+                    return
+                
+                # --- ここから追加フィルタ ---
+                
+                # フィルタリング 3: ATR (Average True Range) が大きすぎないか (追加)
+                # repositoryから過去データを取得 (テキスト分析用データ取得時にATRも取得済みと仮定)
+                # 注意: get_stock_full_data_period で indicator テーブルから ATR を取得している必要がある
+                stock_data_for_atr = repository.get_stock_full_data_period(code_4digit, industry_name, fetch_days=30) # ATR計算用に少し余分に取得
+                if not stock_data_for_atr or 'atr' not in stock_data_for_atr[-1] or stock_data_for_atr[-1]['atr'] is None:
+                    logger.warning(f"{stock_code}: ATRデータが取得できないため、ATRフィルタをスキップします。")
+                else:
+                    latest_atr = float(stock_data_for_atr[-1]['atr'])
+                    # ATR閾値の例: 最新終値の5%以下 (この値は調整可能)
+                    atr_threshold_percentage = 0.05 
+                    atr_threshold_value = close_price * atr_threshold_percentage
+                    if latest_atr > atr_threshold_value:
+                        logger.info(f"{stock_code}: 最新ATR ({latest_atr:,.2f}) が閾値 ({atr_threshold_value:,.2f}, 終値の{atr_threshold_percentage:.1%}) を超えているため除外 (ボラティリティ高)")
+                        return
+
+                # フィルタリング 4: 出来高が急増していないか (追加)
+                latest_volume = latest_price.get('volume')
+                avg_volume_20 = repository.get_average_volume(code_4digit, industry_name, days=20)
+                
+                if latest_volume is None or avg_volume_20 is None or avg_volume_20 == 0:
+                     logger.warning(f"{stock_code}: 出来高データが不足しているため、出来高比率フィルタをスキップします。")
+                else:
+                    volume_ratio_threshold = 1.5 # 例: 1.5倍以上 (この値は調整可能)
+                    if latest_volume < avg_volume_20 * volume_ratio_threshold:
+                        logger.info(f"{stock_code}: 最新出来高 ({latest_volume:,.0f}) が20日平均 ({avg_volume_20:,.0f}) の {volume_ratio_threshold} 倍未満のため除外")
+                        return
+
+                # フィルタリング 5: 移動平均線のパーフェクトオーダー (TODO)
+                # TODO: repositoryから必要な期間の終値データを取得し、5日MA > 25日MA を計算してフィルタリングする
+                #       例: data = repository.get_stock_price_only(code_4digit, industry_name, fetch_days=30) # 仮
+                #           if data and len(data) >= 25:
+                #               closes = [d['close'] for d in data]
+                #               ma5 = sum(closes[-5:]) / 5
+                #               ma25 = sum(closes[-25:]) / 25
+                #               if ma5 <= ma25:
+                #                   logger.info(f"{stock_code}: 5日移動平均 ({ma5:,.1f}) が 25日移動平均 ({ma25:,.1f}) 以下または同値のため除外 (上昇トレンド弱)")
+                #                   return
+                #           else:
+                #               logger.warning(f"{stock_code}: 移動平均計算に必要なデータが不足")
+
+                # フィルタリング 6: ADXによるトレンド判定 (プランBにはないが、TODOとしてコメントアウトで残す)
+                # TODO: ADX > 25 かつ +DI > -DI のような条件を追加する場合はここに実装
+                #       stock_data_for_atr に adx も含まれているはず
+                #       if not stock_data_for_atr or 'adx' not in stock_data_for_atr[-1] or stock_data_for_atr[-1]['adx'] is None:
+                #            logger.warning(f"{stock_code}: ADXデータが取得できないため、ADXフィルタをスキップします。")
+                #       else:
+                #            latest_adx = float(stock_data_for_atr[-1]['adx'])
+                #            # +DI, -DI も同様に取得する必要がある
+                #            adx_threshold = 25 
+                #            # if latest_adx < adx_threshold or latest_plus_di <= latest_minus_di: # 仮
+                #            #     logger.info(f"{stock_code}: ADX ({latest_adx:,.1f}) が閾値 ({adx_threshold}) 未満、または+DI <= -DI のため除外 (トレンド不明瞭)")
+                #            #     return
+
 
                 # すべての条件を満たした場合
                 logger.info(f"{stock_code}: 全てのフィルタ条件を満たしています。")

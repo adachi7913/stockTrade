@@ -297,7 +297,7 @@ class ApiHandler:
         self.logger.error("有効なJSON形式が見つかりませんでした")
         return None
 
-    def call_gemini_api(self, prompt=None, temperature=0, top_k=3, top_p=0.9, max_output_tokens=4096, safety_filter=None, stock_code=None, retry_count=0):
+    def call_gemini_api(self, prompt=None, temperature=0, top_k=3, top_p=0.9, max_output_tokens=8192, safety_filter=None, stock_code=None, retry_count=0):
         """
         Gemini APIを呼び出してテキスト生成を行い、JSONレスポンスを取得します
         
@@ -362,16 +362,20 @@ class ApiHandler:
                 """
                 
                 # マルチモーダル入力の構築
-                import google.generativeai as genai
+                # import google.generativeai as genai # Top level import is sufficient
                 
-                # チャート画像をPart(content_parts)として準備
-                chart_part = genai.types.Blob(
-                    mime_type="image/png",
-                    data=self.chart_image_bytes
-                )
+                # チャート画像をPartとして準備（辞書形式で指定）
+                chart_part = {
+                    "mime_type": "image/png",
+                    "data": self.chart_image_bytes
+                }
                 
                 # プロンプト全体を構築（チャート画像の分析指示を追加）
                 full_prompt = prompt + chart_prompt
+                
+                # ★ 送信するプロンプトと画像サイズをログ出力
+                # self.logger.info(f"送信するプロンプト全文 (マルチモーダル):{full_prompt}")
+                # self.logger.info(f"送信する画像サイズ: {len(self.chart_image_bytes)} バイト")
                 
                 # マルチモーダルリクエストの作成
                 response = self.model.generate_content(
@@ -380,6 +384,8 @@ class ApiHandler:
                     safety_settings=safety_settings
                 )
             else:
+                # ★ 送信するプロンプトをログ出力
+                # self.logger.info(f"送信するプロンプト全文 (テキストのみ):{prompt}")
                 # 通常のテキストのみのリクエスト
                 response = self.model.generate_content(
                     prompt,
@@ -406,6 +412,11 @@ class ApiHandler:
                     self.logger.warning(f"API応答が最大トークン数に達して途切れました。finishReason: {finish_reason}")
                 elif finish_reason == 'SAFETY' or finish_reason == 2:
                     self.logger.error(f"APIの安全フィルターにより応答が途切れました。finishReason: {finish_reason}")
+                    # 安全性フィードバックの詳細をログに出力
+                    if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                        self.logger.error(f"Prompt Feedback: {response.prompt_feedback}")
+                    if candidate and hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
+                        self.logger.error(f"Safety Ratings: {candidate.safety_ratings}")
                     raise Exception(f"APIの安全フィルターにより応答が途切れました: {finish_reason}")
                 elif finish_reason != 'STOP' and finish_reason is not None and finish_reason != 0:
                     self.logger.warning(f"想定外のfinishReason: {finish_reason}")
