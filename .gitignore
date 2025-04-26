@@ -8,7 +8,7 @@ stooq.html
 .env
 .env.backup
 log/
-.specstory/history/
+.specstory
 pandas-ta/
 price_csv/
 *prompt.txt
@@ -26,4 +26,4 @@ recovery_state.txt
 temp_prices/
 bk/
 mcp.json
-temp_rules/
+temp_rules
