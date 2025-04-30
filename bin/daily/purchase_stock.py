@@ -60,7 +60,7 @@ from utils.logging_config import setup_logging, cleanup_old_logs
 # - 定期実行の仕組み
 
 # ロギングの設定
-logger = setup_logging("stock_purchase")
+# logger = setup_logging("stock_purchase")
 
 class StockPurchaseManager:
     """
