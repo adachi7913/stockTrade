@@ -549,7 +549,7 @@ def main():
     """メイン処理"""
     # ロガーの設定
     logger = setup_logging("auto_sell_stock")
-    
+
     # コマンドライン引数の解析
     parser = argparse.ArgumentParser(description='保有株式の自動売却処理')
     parser.add_argument('--test', action='store_true', help='テストモードで実行（実際の売買は行わない）')
@@ -560,102 +560,188 @@ def main():
     try:
         # AutoSellStockインスタンスの作成
         auto_sell = AutoSellStock(logger, test_mode=args.test)
-        
+
         # 保有証券情報の取得
         holdings = auto_sell.get_holdings()
-        if not holdings:
+        if holdings is None: # Noneチェックも行う
             logger.error("保有証券情報の取得に失敗しました")
             return
-            
+
         if not holdings:
             logger.info("保有証券が見つかりません")
             return
-            
+
         logger.info(f"取得した保有証券: {holdings}")
-        
+
         # 各銘柄ごとに処理を実行
-        for code, current_price in holdings.items():
-            logger.info(f"\n===== 証券コード {code} ({current_price['position']}) の処理を開始 =====")
-            
-            # 1. 過去の価格とインジケーターを取得
-            historical_data = auto_sell.get_stock_data(code)
-            if not historical_data:
-                logger.error(f"証券コード {code} の株価データ取得に失敗しました")
-                continue
-                
-            # 2. 評価を実行
-            evaluation = auto_sell.evaluate_holding_with_ai(code, current_price['current_price'], current_price['position'], historical_data)
-            if not evaluation:
-                logger.error(f"証券コード {code} の評価に失敗しました")
-                continue
-                
-            # 3. 評価結果をデータベースに保存
-            auto_sell.stock_repository.save_holding_evaluation(evaluation, is_test=args.test)
-            
-            # 3.5. entriesテーブルのストップロスと目標価格も更新
-            entry_update = {'code': code}
-            
-            # ストップロスが有効な値なら更新対象に追加
-            if evaluation.stop_loss != "NG":
-                entry_update['stop_loss'] = evaluation.stop_loss
-            
-            # 目標価格が有効な値なら更新対象に追加
-            if evaluation.target_price != "NG":
-                entry_update['target_price'] = evaluation.target_price
-            
-            # is_testパラメータは必須（WHERE句の条件に使用）
-            entry_update['is_test'] = args.test
-            
-            # 更新すべき項目がある場合のみ更新実行
-            if len(entry_update) > 2:  # codeとis_testを除く他の項目がある場合
-                update_success = auto_sell.stock_repository.update_entry(entry_update)
-                if update_success:
-                    update_items = []
-                    if 'stop_loss' in entry_update:
-                        update_items.append(f"ストップロス={evaluation.stop_loss}")
-                    if 'target_price' in entry_update:
-                        update_items.append(f"目標価格={evaluation.target_price}")
-                    
-                    logger.info(f"entriesテーブルの価格情報を更新しました: {', '.join(update_items)}")
+        for code, holding_info in holdings.items(): # holding_info を使うように変更
+            logger.info(f"\n===== 証券コード {code} ({holding_info['position']}) の処理を開始 =====")
+
+            should_evaluate_with_ai = True # AI評価を実行するかどうかのフラグ
+            sell_reason = None # 売却理由（損切り/利確）
+            evaluation = None # evaluation を初期化
+            historical_data = None # historical_data を初期化
+
+            # --- ここから追加 ---
+            try:
+                # 1. 最新の株価データを取得 (現在価格の取得のため)
+                historical_data = auto_sell.get_stock_data(code)
+                if not historical_data:
+                    logger.error(f"証券コード {code} の株価データ取得に失敗しました。AI評価に進みます。")
+                    # データ取得失敗時はAI評価に任せる（あるいは処理中断）
+                    continue # 次の銘柄へ
+
+                current_close_price = float(historical_data[-1]['close']) # 最新の終値を取得
+
+                # 2. entries テーブルからエントリー情報を取得 (stop_loss, target_price のため)
+                entry_details = auto_sell.stock_repository.get_entry_by_code(code, is_test=args.test)
+                if not entry_details:
+                    logger.warning(f"証券コード {code} のエントリー詳細が見つかりません。AI評価に進みます。")
                 else:
-                    logger.error(f"entriesテーブルの価格情報更新に失敗しました")
-            
-            # 4. 評価結果のサマリーを表示
-            logger.info(f"\n証券コード: {code}")
-            logger.info(f"判断: {evaluation.decision}")
-            logger.info(f"確信度: {evaluation.confidence_score}")
-            logger.info(f"理由: {evaluation.reason}")
-            logger.info(f"ストップロス: {evaluation.stop_loss}")
-            logger.info(f"目標価格: {evaluation.target_price}")
-            
-            # 5. 売却判断
-            if evaluation.decision == "SELL" and evaluation.confidence_score >= 500:
-                logger.info(f"\n証券コード {code} ({current_price['position']}) は売却候補です")
-                
+                    # 3. ストップロス価格と比較
+                    stop_loss_str = entry_details.get('stop_loss')
+                    if stop_loss_str and stop_loss_str != 'NG':
+                        try:
+                            stop_loss_price = float(stop_loss_str)
+                            if current_close_price <= stop_loss_price:
+                                logger.info(f"ストップロス条件に抵触: 現在価格({current_close_price}) <= ストップロス({stop_loss_price})")
+                                should_evaluate_with_ai = False
+                                sell_reason = f"Stop loss triggered (Current: {current_close_price} <= Stop: {stop_loss_price})"
+                                # 簡易的なEvaluationResultを作成して売却処理へ
+                                evaluation = EvaluationResult(
+                                    code=code,
+                                    decision="SELL",
+                                    confidence_score=1000, # 最高確信度
+                                    reason=sell_reason,
+                                    stop_loss=str(current_close_price), # 売却価格を記録
+                                    target_price="NG"
+                                )
+                                evaluation.close = current_close_price # 最新価格を設定
+                        except ValueError:
+                            logger.warning(f"ストップロス価格が無効な値です: {stop_loss_str}")
+
+                    # 4. 目標価格と比較 (ストップロスに抵触していない場合のみ)
+                    if should_evaluate_with_ai: # まだ売却が決まっていない場合
+                        target_price_str = entry_details.get('target_price')
+                        if target_price_str and target_price_str != 'NG':
+                            try:
+                                target_price = float(target_price_str)
+                                if current_close_price >= target_price:
+                                    logger.info(f"目標価格に到達: 現在価格({current_close_price}) >= 目標価格({target_price})")
+                                    should_evaluate_with_ai = False
+                                    sell_reason = f"Target price reached (Current: {current_close_price} >= Target: {target_price})"
+                                    # 簡易的なEvaluationResultを作成して売却処理へ
+                                    evaluation = EvaluationResult(
+                                        code=code,
+                                        decision="SELL",
+                                        confidence_score=1000, # 最高確信度
+                                        reason=sell_reason,
+                                        stop_loss="NG",
+                                        target_price=str(current_close_price) # 売却価格を記録
+                                    )
+                                    evaluation.close = current_close_price # 最新価格を設定
+                            except ValueError:
+                                logger.warning(f"目標価格が無効な値です: {target_price_str}")
+
+            except Exception as e:
+                logger.error(f"価格比較処理中に予期せぬエラーが発生: {e}", exc_info=True)
+                # エラー発生時もAI評価に進むか、処理を中断するか検討が必要
+                # ここでは安全のためAI評価に進むことにする
+                should_evaluate_with_ai = True
+            # --- ここまで追加 ---
+
+
+            # 5. AIによる評価 (損切り/利確条件に該当しなかった場合)
+            if should_evaluate_with_ai:
+                # historical_data が None の場合 (価格比較処理でエラーが発生した場合など) は再取得
+                if historical_data is None:
+                    historical_data = auto_sell.get_stock_data(code)
+                    if not historical_data:
+                         logger.error(f"証券コード {code} の株価データ再取得にも失敗しました")
+                         continue
+
+                # AI評価を実行
+                evaluation = auto_sell.evaluate_holding_with_ai(code, holding_info['current_price'], holding_info['position'], historical_data)
+                if not evaluation:
+                    logger.error(f"証券コード {code} のAI評価に失敗しました")
+                    continue
+                # AI評価の場合、最新価格を evaluation に設定しておく（テスト売却で使うため）
+                evaluation.close = float(historical_data[-1]['close'])
+
+                # 6. 評価結果をデータベースに保存 (AI評価した場合のみ)
+                auto_sell.stock_repository.save_holding_evaluation(evaluation, is_test=args.test)
+
+                # 7. entriesテーブルのストップロスと目標価格も更新 (AI評価した場合のみ)
+                entry_update = {'code': code}
+                if evaluation.stop_loss != "NG":
+                    entry_update['stop_loss'] = evaluation.stop_loss
+                if evaluation.target_price != "NG":
+                    entry_update['target_price'] = evaluation.target_price
+                entry_update['is_test'] = args.test
+                if len(entry_update) > 2:
+                    update_success = auto_sell.stock_repository.update_entry(entry_update)
+                    if update_success:
+                        update_items = []
+                        if 'stop_loss' in entry_update: update_items.append(f"ストップロス={evaluation.stop_loss}")
+                        if 'target_price' in entry_update: update_items.append(f"目標価格={evaluation.target_price}")
+                        logger.info(f"entriesテーブルのAI推奨価格情報を更新しました: {', '.join(update_items)}")
+                    else:
+                        logger.error(f"entriesテーブルのAI推奨価格情報更新に失敗しました")
+
+                # 8. AI評価結果のサマリーを表示
+                logger.info(f"\nAI評価結果 - 証券コード: {code}")
+                logger.info(f"判断: {evaluation.decision}")
+                logger.info(f"確信度: {evaluation.confidence_score}")
+                logger.info(f"理由: {evaluation.reason}")
+                logger.info(f"推奨ストップロス: {evaluation.stop_loss}")
+                logger.info(f"推奨目標価格: {evaluation.target_price}")
+
+            # 9. 売却判断 (損切り/利確か、AI判断か)
+            # evaluation が存在し (損切り/利確 or AI評価成功)、かつ売却条件を満たす場合
+            if evaluation and (sell_reason or (evaluation.decision == "SELL" and evaluation.confidence_score >= 500)):
+                # 損切り/利確の場合とAI判断の場合でログメッセージを分ける
+                if sell_reason:
+                    log_reason_type = '損切り' if 'Stop loss' in sell_reason else '利益確定'
+                    logger.info(f"\n証券コード {code} ({holding_info['position']}) はルールベース ({log_reason_type}) により売却候補です")
+                else:
+                     logger.info(f"\n証券コード {code} ({holding_info['position']}) はAI判断により売却候補です (確信度: {evaluation.confidence_score})")
+
                 # テストモードの場合
                 if args.test:
+                    # evaluation オブジェクトは上で作成または取得されているはず
                     logger.info(f"テストモードのため、実際の売却は実行されません")
-                    logger.info(f"テストモードでの売却シミュレーションを実行します")
-                    auto_sell.execute_test_sell(code, evaluation, current_price['position'], current_price)
+                    log_sim_type = '損切り' if sell_reason and 'Stop loss' in sell_reason else ('利益確定' if sell_reason else '売却')
+                    logger.info(f"テストモードでの {log_sim_type} シミュレーションを実行します")
+                     # execute_test_sell に evaluation を渡す（損切り/利確時は上で簡易作成したものを利用）
+                    auto_sell.execute_test_sell(code, evaluation, holding_info['position'], holding_info)
                     continue
-                
+
                 # 強制売却モードの場合
                 if args.force_sell:
-                    logger.info(f"強制売却モードで {code} を売却します")
-                    auto_sell.execute_sell(code, evaluation)
+                    log_force_type = '損切り' if sell_reason and 'Stop loss' in sell_reason else ('利益確定' if sell_reason else '売却')
+                    logger.info(f"強制売却モードで {code} を {log_force_type} します")
+                    # execute_sell を呼び出す (要実装 or 改修)
+                    # auto_sell.execute_sell(code, evaluation) # execute_sell が未実装の場合はコメントアウト
+                    logger.warning("execute_sell 関数が未実装またはコメントアウトされています。")
                     continue
-                
+
                 # 通常モードの場合は確認を求める
-                if input(f"\n{code}を売却しますか？ (y/n): ").lower() == 'y':
-                    auto_sell.execute_sell(code, evaluation)
-            else:
-                logger.info(f"証券コード {code} ({current_price['position']}) は保有継続と判断されました")
-            
+                log_confirm_type = '損切り' if sell_reason and 'Stop loss' in sell_reason else ('利益確定' if sell_reason else '売却')
+                if input(f"\n{code}を {log_confirm_type} しますか？ (y/n): ").lower() == 'y':
+                    # execute_sell を呼び出す (要実装 or 改修)
+                    # auto_sell.execute_sell(code, evaluation) # execute_sell が未実装の場合はコメントアウト
+                    logger.warning("execute_sell 関数が未実装またはコメントアウトされています。")
+            # 保有継続の場合 (evaluationが存在しない、または売却条件を満たさない)
+            elif evaluation is None and not sell_reason: # AI評価もスキップされ、損切り/利確もなかった場合(エラーケースなど)
+                logger.warning(f"証券コード {code} の評価情報がなく、売却判断ができませんでした。")
+            else: # evaluation があり、HOLDと判断された場合
+                logger.info(f"証券コード {code} ({holding_info['position']}) は保有継続と判断されました")
+
             logger.info(f"===== 証券コード {code} の処理を完了 =====\n")
 
     except Exception as e:
-        logger.error(f"エラーが発生しました: {e}")
-        raise
+        logger.error(f"メイン処理でエラーが発生しました: {e}", exc_info=True) # トレースバックも出力
+        # raise # 必要に応じて再raiseする
 
 if __name__ == "__main__":
     main() 
