@@ -1,7 +1,7 @@
 import os
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 # プロジェクトルートディレクトリをPythonパスに追加
 project_root = str(Path(__file__).parent.parent.parent)
@@ -28,6 +28,47 @@ class AutoSellStock:
         self.browser_use = None if test_mode else BrowserUse()
         self.stock_repository = StockRepository()
         self.api_handler = None
+        self.holidays = self._load_holidays() # 祝日リストをロード
+
+    def _load_holidays(self) -> set:
+        """
+        祝日リストをロードする。
+        現状は空のセットを返すが、将来的にファイルや固定リストから読み込むように拡張できる。
+        戻り値は datetime.date オブジェクトのセット。
+        """
+        # 例:
+        # fixed_holidays = {
+        #     date(2024, 1, 1), date(2024, 1, 8), date(2024, 2, 11), date(2024, 2, 12),
+        #     date(2024, 2, 23), date(2024, 3, 20), date(2024, 4, 29), date(2024, 5, 3),
+        #     date(2024, 5, 4), date(2024, 5, 5), date(2024, 5, 6), date(2024, 7, 15),
+        #     date(2024, 8, 11), date(2024, 8, 12), date(2024, 9, 16), date(2024, 9, 22),
+        #     date(2024, 9, 23), date(2024, 10, 14), date(2024, 11, 3), date(2024, 11, 4),
+        #     date(2024, 11, 23),
+        # }
+        # return fixed_holidays
+        self.logger.info("祝日リストのロード処理は現在未実装です。土日のみ考慮して営業日を計算します。")
+        return set()
+
+    def calculate_elapsed_business_days(self, entry_date_obj: date, today_obj: date) -> int:
+        """
+        指定されたエントリー日から今日までの経過営業日数（土日・祝日を除く）を計算する。
+        エントリー日当日は0日目としてカウント開始。
+        """
+        if not isinstance(entry_date_obj, date) or not isinstance(today_obj, date):
+            self.logger.error("日付オブジェクトが無効です。")
+            return -1 # エラーを示す
+
+        if entry_date_obj >= today_obj:
+            return 0
+
+        business_days = 0
+        current_date_iter = entry_date_obj
+        while current_date_iter < today_obj: # 当日までをカウントするので <
+            # weekday() は月曜日が0, 日曜日が6
+            if current_date_iter.weekday() < 5 and current_date_iter not in self.holidays: # 土日(5,6)でなく、祝日でもない
+                business_days += 1
+            current_date_iter += timedelta(days=1)
+        return business_days
 
     def print_evaluation_summary(self, results: Dict[str, EvaluationResult]) -> None:
         """評価結果のサマリーを表示"""
@@ -449,7 +490,7 @@ class AutoSellStock:
             if trade_id:
                 self.logger.info(f"テスト{log_action}結果を保存しました (trade_id: {trade_id})")
             else:
-                 self.logger.error(f"テスト{log_action}結果の保存に失敗しました")
+                 self.logger.error(f"テスト{log_action}結果の保存に失敗しました", exc_info=True)
 
             # --- entries テーブルの更新処理 ---
             entry_update_data = {
@@ -603,10 +644,22 @@ def main():
                     if stop_loss_str and stop_loss_str != 'NG':
                         try:
                             stop_loss_price = float(stop_loss_str)
-                            if current_close_price <= stop_loss_price:
-                                logger.info(f"ストップロス条件に抵触: 現在価格({current_close_price}) <= ストップロス({stop_loss_price})")
+                            # ★★★ ショートポジションの損切り条件を追加 ★★★
+                            if holding_info['position'] == 'long':
+                                is_stop_loss = current_close_price <= stop_loss_price
+                                comparison_symbol = '<='
+                            elif holding_info['position'] == 'short':
+                                is_stop_loss = current_close_price >= stop_loss_price
+                                comparison_symbol = '>='
+                            else: # ポジションが不明な場合はスキップ
+                                is_stop_loss = False
+                                comparison_symbol = '??'
+                                logger.warning(f"ポジションタイプが不明なため、ストップロス比較をスキップ: {holding_info['position']}")
+
+                            if is_stop_loss:
+                                logger.info(f"ストップロス条件に抵触: 現在価格({current_close_price}) {comparison_symbol} ストップロス({stop_loss_price})")
                                 should_evaluate_with_ai = False
-                                sell_reason = f"Stop loss triggered (Current: {current_close_price} <= Stop: {stop_loss_price})"
+                                sell_reason = f"Stop loss triggered (Current: {current_close_price} {comparison_symbol} Stop: {stop_loss_price})"
                                 # 簡易的なEvaluationResultを作成して売却処理へ
                                 evaluation = EvaluationResult(
                                     code=code,
@@ -626,10 +679,22 @@ def main():
                         if target_price_str and target_price_str != 'NG':
                             try:
                                 target_price = float(target_price_str)
-                                if current_close_price >= target_price:
-                                    logger.info(f"目標価格に到達: 現在価格({current_close_price}) >= 目標価格({target_price})")
+                                # ★★★ ショートポジションの利確条件を追加 ★★★
+                                if holding_info['position'] == 'long':
+                                    is_target_reached = current_close_price >= target_price
+                                    comparison_symbol = '>='
+                                elif holding_info['position'] == 'short':
+                                    is_target_reached = current_close_price <= target_price
+                                    comparison_symbol = '<='
+                                else: # ポジションが不明な場合はスキップ
+                                    is_target_reached = False
+                                    comparison_symbol = '??'
+                                    logger.warning(f"ポジションタイプが不明なため、目標価格比較をスキップ: {holding_info['position']}")
+
+                                if is_target_reached:
+                                    logger.info(f"目標価格に到達: 現在価格({current_close_price}) {comparison_symbol} 目標価格({target_price})")
                                     should_evaluate_with_ai = False
-                                    sell_reason = f"Target price reached (Current: {current_close_price} >= Target: {target_price})"
+                                    sell_reason = f"Target price reached (Current: {current_close_price} {comparison_symbol} Target: {target_price})"
                                     # 簡易的なEvaluationResultを作成して売却処理へ
                                     evaluation = EvaluationResult(
                                         code=code,
@@ -643,15 +708,44 @@ def main():
                             except ValueError:
                                 logger.warning(f"目標価格が無効な値です: {target_price_str}")
 
+                    # --- ここから最低保有期間チェックを追加 ---
+                    if should_evaluate_with_ai: # まだ売却が決まっていない場合のみ期間チェック
+                        MIN_HOLDING_BUSINESS_DAYS = 2 # 最低保有営業日数
+                        entry_date_str = entry_details.get('entry_date') # 'YYYY-MM-DD HH:MM:SS' または 'YYYY-MM-DD'
+
+                        if entry_date_str:
+                            try:
+                                parsed_date_obj = None
+                                if ' ' in entry_date_str: # 'YYYY-MM-DD HH:MM:SS' の形式の場合
+                                    parsed_date_obj = datetime.strptime(entry_date_str.split(' ')[0], '%Y-%m-%d').date()
+                                else: # 'YYYY-MM-DD' の形式を期待
+                                    parsed_date_obj = datetime.strptime(entry_date_str, '%Y-%m-%d').date()
+
+                                today_obj = date.today() # datetime.date.today()
+
+                                elapsed_business_days = auto_sell.calculate_elapsed_business_days(parsed_date_obj, today_obj)
+                                
+                                if elapsed_business_days == -1: # 計算エラーの場合
+                                     logger.error(f"証券コード {code}: 経過営業日数の計算に失敗しました。保有期間チェックをスキップします。")
+                                else:
+                                    logger.info(f"証券コード {code}: エントリー日 {parsed_date_obj}, 経過営業日数 {elapsed_business_days}日")
+                                    if elapsed_business_days < MIN_HOLDING_BUSINESS_DAYS:
+                                        logger.info(f"最低保有期間 ({MIN_HOLDING_BUSINESS_DAYS}営業日) に未達のため、AI評価・売却処理をスキップします。")
+                                        should_evaluate_with_ai = False # AI評価に進まない
+                                        # この後の売却判断で保有継続となる
+                            except ValueError as ve:
+                                logger.error(f"エントリー日の形式が正しくありません: '{entry_date_str}' - {ve}。保有期間チェックをスキップします。")
+                            except Exception as e:
+                                logger.error(f"保有期間計算中に予期せぬエラーが発生: {e}。保有期間チェックをスキップします。", exc_info=True)
+                        else:
+                            logger.warning(f"証券コード {code}: エントリー日が見つからないため、保有期間チェックをスキップします。")
+                    # --- ここまで最低保有期間チェック ---
             except Exception as e:
-                logger.error(f"価格比較処理中に予期せぬエラーが発生: {e}", exc_info=True)
-                # エラー発生時もAI評価に進むか、処理を中断するか検討が必要
-                # ここでは安全のためAI評価に進むことにする
-                should_evaluate_with_ai = True
-            # --- ここまで追加 ---
+                logger.error(f"価格比較または保有期間チェック処理中に予期せぬエラー: {e}", exc_info=True)
+                should_evaluate_with_ai = True # エラー時はAI評価にフォールバック（あるいは中断）
 
 
-            # 5. AIによる評価 (損切り/利確条件に該当しなかった場合)
+            # 5. AIによる評価 (損切り/利確条件に該当せず、かつ保有期間も満たした場合)
             if should_evaluate_with_ai:
                 # historical_data が None の場合 (価格比較処理でエラーが発生した場合など) は再取得
                 if historical_data is None:
@@ -732,10 +826,14 @@ def main():
                     # auto_sell.execute_sell(code, evaluation) # execute_sell が未実装の場合はコメントアウト
                     logger.warning("execute_sell 関数が未実装またはコメントアウトされています。")
             # 保有継続の場合 (evaluationが存在しない、または売却条件を満たさない)
-            elif evaluation is None and not sell_reason: # AI評価もスキップされ、損切り/利確もなかった場合(エラーケースなど)
-                logger.warning(f"証券コード {code} の評価情報がなく、売却判断ができませんでした。")
-            else: # evaluation があり、HOLDと判断された場合
-                logger.info(f"証券コード {code} ({holding_info['position']}) は保有継続と判断されました")
+            elif evaluation is None and not sell_reason: # AI評価もスキップされ、損切り/利確もなく、保有期間未達でもない場合 (基本的には保有期間未達でshould_evaluate_with_ai=Falseになる)
+                # 上記の保有期間チェックで should_evaluate_with_ai = False になっているので、
+                # このelifは、例えばエントリー日がない、日付パースエラーなどで保有期間チェック自体がスキップされ、
+                # かつAI評価にも進まなかったレアケース用。
+                # 実際には保有期間未達のログが出力されていれば、ここは通らないか、保有継続のログが出るはず。
+                logger.info(f"証券コード {code} ({holding_info['position']}) は、評価情報不足または保有期間未達のため保有継続します。")
+            else: # AI評価がHOLDだった場合、または保有期間未達でAI評価がスキップされた場合
+                 logger.info(f"証券コード {code} ({holding_info['position']}) は保有継続と判断されました")
 
             logger.info(f"===== 証券コード {code} の処理を完了 =====\n")
 

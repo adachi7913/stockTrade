@@ -70,14 +70,14 @@ def run_ai_rule_generation(logger=None):
                 if close_price < 500: # 100円 -> 500円 に変更
                     logger.info(f"{stock_code}: 終値 {close_price:,.0f} 円 は最低価格 500 円以上の条件を満たしていません。")
                     return
-                if close_price > 4000: # 5000円 -> 4000円 に変更
-                    logger.info(f"{stock_code}: 終値 {close_price:,.0f} 円 は 4000 円以下の条件を満たしていません。")
+                if close_price > 5000: # 5000円 -> 5000円 に変更
+                    logger.info(f"{stock_code}: 終値 {close_price:,.0f} 円 は 5000 円以下の条件を満たしていません。")
                     return
 
                 # フィルタリング 2: 平均出来高代金が一定以上 (1億円) (変更)
                 avg_volume_15 = repository.get_average_volume(code_4digit, industry_name, days=15)
                 avg_trading_value_15 = avg_volume_15 * close_price
-                min_avg_trading_value = 100_000_000 # 5000万円 -> 1億円 に変更
+                min_avg_trading_value = 50_000_000 # 5000万円 -> 5000万円 に変更
                 if avg_trading_value_15 < min_avg_trading_value:
                     logger.info(f"{stock_code}: 過去15日の平均出来高代金が {min_avg_trading_value / 10000:,.0f} 万円未満（{avg_trading_value_15:,.0f}円）のため除外")
                     return
