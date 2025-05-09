@@ -15,6 +15,7 @@ from Gemini.api_handler import ApiHandler
 from models.evaluation_result import EvaluationResult
 from lib.code_validator import validate_stock_code
 from utils.logging_config import setup_logging
+from utils.date_util import is_holiday as is_holiday_check
 import json
 from typing import Optional, Dict, List
 import argparse
@@ -28,30 +29,11 @@ class AutoSellStock:
         self.browser_use = None if test_mode else BrowserUse()
         self.stock_repository = StockRepository()
         self.api_handler = None
-        self.holidays = self._load_holidays() # 祝日リストをロード
-
-    def _load_holidays(self) -> set:
-        """
-        祝日リストをロードする。
-        現状は空のセットを返すが、将来的にファイルや固定リストから読み込むように拡張できる。
-        戻り値は datetime.date オブジェクトのセット。
-        """
-        # 例:
-        # fixed_holidays = {
-        #     date(2024, 1, 1), date(2024, 1, 8), date(2024, 2, 11), date(2024, 2, 12),
-        #     date(2024, 2, 23), date(2024, 3, 20), date(2024, 4, 29), date(2024, 5, 3),
-        #     date(2024, 5, 4), date(2024, 5, 5), date(2024, 5, 6), date(2024, 7, 15),
-        #     date(2024, 8, 11), date(2024, 8, 12), date(2024, 9, 16), date(2024, 9, 22),
-        #     date(2024, 9, 23), date(2024, 10, 14), date(2024, 11, 3), date(2024, 11, 4),
-        #     date(2024, 11, 23),
-        # }
-        # return fixed_holidays
-        self.logger.info("祝日リストのロード処理は現在未実装です。土日のみ考慮して営業日を計算します。")
-        return set()
 
     def calculate_elapsed_business_days(self, entry_date_obj: date, today_obj: date) -> int:
         """
         指定されたエントリー日から今日までの経過営業日数（土日・祝日を除く）を計算する。
+        utils.date_util.is_holiday を使用。
         エントリー日当日は0日目としてカウント開始。
         """
         if not isinstance(entry_date_obj, date) or not isinstance(today_obj, date):
@@ -63,9 +45,10 @@ class AutoSellStock:
 
         business_days = 0
         current_date_iter = entry_date_obj
-        while current_date_iter < today_obj: # 当日までをカウントするので <
-            # weekday() は月曜日が0, 日曜日が6
-            if current_date_iter.weekday() < 5 and current_date_iter not in self.holidays: # 土日(5,6)でなく、祝日でもない
+        while current_date_iter < today_obj:
+            # is_holiday_check は土日・祝日なら True を返す
+            # is_holiday_checkの引数はdatetime.date型である必要がある
+            if not is_holiday_check(current_date_iter): # 平日ならカウント
                 business_days += 1
             current_date_iter += timedelta(days=1)
         return business_days
