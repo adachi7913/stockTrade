@@ -694,34 +694,45 @@ def main():
                     # --- ここから最低保有期間チェックを追加 ---
                     if should_evaluate_with_ai: # まだ売却が決まっていない場合のみ期間チェック
                         MIN_HOLDING_BUSINESS_DAYS = 2 # 最低保有営業日数
-                        entry_date_str = entry_details.get('entry_date') # 'YYYY-MM-DD HH:MM:SS' または 'YYYY-MM-DD'
+                        entry_date_value = entry_details.get('entry_date') # 変数名を value に変更
 
-                        if entry_date_str:
+                        if entry_date_value is not None: # Noneでないことを確認
                             try:
                                 parsed_date_obj = None
-                                if ' ' in entry_date_str: # 'YYYY-MM-DD HH:MM:SS' の形式の場合
-                                    parsed_date_obj = datetime.strptime(entry_date_str.split(' ')[0], '%Y-%m-%d').date()
-                                else: # 'YYYY-MM-DD' の形式を期待
-                                    parsed_date_obj = datetime.strptime(entry_date_str, '%Y-%m-%d').date()
-
-                                today_obj = date.today() # datetime.date.today()
-
-                                elapsed_business_days = auto_sell.calculate_elapsed_business_days(parsed_date_obj, today_obj)
-                                
-                                if elapsed_business_days == -1: # 計算エラーの場合
-                                     logger.error(f"証券コード {code}: 経過営業日数の計算に失敗しました。保有期間チェックをスキップします。")
+                                if isinstance(entry_date_value, str): # 文字列の場合
+                                    # self.logger.debug(f"エントリー日は文字列として取得: {entry_date_value}") # ログレベルは適宜調整
+                                    if ' ' in entry_date_value: # 'YYYY-MM-DD HH:MM:SS' の形式の場合
+                                        parsed_date_obj = datetime.strptime(entry_date_value.split(' ')[0], '%Y-%m-%d').date()
+                                    else: # 'YYYY-MM-DD' の形式を期待
+                                        parsed_date_obj = datetime.strptime(entry_date_value, '%Y-%m-%d').date()
+                                elif isinstance(entry_date_value, date): # 既に datetime.date オブジェクトの場合
+                                    # self.logger.debug(f"エントリー日はdateオブジェクトとして取得: {entry_date_value}") # ログレベルは適宜調整
+                                    parsed_date_obj = entry_date_value
                                 else:
-                                    logger.info(f"証券コード {code}: エントリー日 {parsed_date_obj}, 経過営業日数 {elapsed_business_days}日")
-                                    if elapsed_business_days < MIN_HOLDING_BUSINESS_DAYS:
-                                        logger.info(f"最低保有期間 ({MIN_HOLDING_BUSINESS_DAYS}営業日) に未達のため、AI評価・売却処理をスキップします。")
-                                        should_evaluate_with_ai = False # AI評価に進まない
-                                        # この後の売却判断で保有継続となる
-                            except ValueError as ve:
-                                logger.error(f"エントリー日の形式が正しくありません: '{entry_date_str}' - {ve}。保有期間チェックをスキップします。")
+                                    logger.error(f"エントリー日の型が予期せぬ型です ({type(entry_date_value)})。保有期間チェックをスキップします。")
+                                    # parsed_date_obj は None のまま
+
+                                if parsed_date_obj: # parsed_date_obj が正常に設定された場合のみ計算
+                                    today_obj = date.today()
+                                    elapsed_business_days = auto_sell.calculate_elapsed_business_days(parsed_date_obj, today_obj)
+
+                                    if elapsed_business_days == -1: # 計算エラーの場合
+                                        logger.error(f"証券コード {code}: 経過営業日数の計算に失敗しました。保有期間チェックをスキップします。")
+                                    else:
+                                        logger.info(f"証券コード {code}: エントリー日 {parsed_date_obj}, 経過営業日数 {elapsed_business_days}日")
+                                        if elapsed_business_days < MIN_HOLDING_BUSINESS_DAYS:
+                                            logger.info(f"最低保有期間 ({MIN_HOLDING_BUSINESS_DAYS}営業日) に未達のため、AI評価・売却処理をスキップします。")
+                                            should_evaluate_with_ai = False
+                                else:
+                                    # parsed_date_obj が None (型が不正だったなど) の場合
+                                    logger.warning(f"証券コード {code}: エントリー日のパースに失敗したため、保有期間チェックをスキップします。")
+
+                            except ValueError as ve: # strptime でのエラー
+                                logger.error(f"エントリー日の文字列形式が正しくありません: '{entry_date_value}' - {ve}。保有期間チェックをスキップします。")
                             except Exception as e:
                                 logger.error(f"保有期間計算中に予期せぬエラーが発生: {e}。保有期間チェックをスキップします。", exc_info=True)
                         else:
-                            logger.warning(f"証券コード {code}: エントリー日が見つからないため、保有期間チェックをスキップします。")
+                            logger.warning(f"証券コード {code}: エントリー日 (entry_date) がNoneです。保有期間チェックをスキップします。")
                     # --- ここまで最低保有期間チェック ---
             except Exception as e:
                 logger.error(f"価格比較または保有期間チェック処理中に予期せぬエラー: {e}", exc_info=True)
