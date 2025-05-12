@@ -1,5 +1,7 @@
 import os
 import sys
+from datetime import date, timedelta, datetime
+from utils.date_util import is_holiday
 
 # デバッグ情報の出力
 def print_debug_info():
@@ -627,7 +629,6 @@ class StockPurchaseManager:
                     continue
 
                 # エントリー情報の共通設定
-                from datetime import datetime
                 candidate['entry_date'] = datetime.now().strftime('%Y-%m-%d')
                 candidate['status'] = 'active'  # 新規エントリーは'active'ステータス
                 candidate['reason'] = judgment.get('reasoning', '理由なし')  # AIの判断理由を設定
@@ -789,6 +790,14 @@ def main():
     
     args = parser.parse_args()
     
+    # --- 評価対象日（昨日）が非稼働日かどうかのチェックを追加 ---
+    today_date = date.today()
+    yesterday_date = today_date - timedelta(days=1)
+    if is_holiday(yesterday_date): # 昨日が休日か判定
+        logger.info(f"評価対象日 ({yesterday_date}) は非稼働日（土日祝）のため、本日の購入処理をスキップします。")
+        return # 処理を終了
+    # --- ここまで追加 ---
+
     # デバッグモードが有効な場合は追加の情報を表示
     if args.debug:
         logger.info("\n=== 実行時デバッグ情報 ===")

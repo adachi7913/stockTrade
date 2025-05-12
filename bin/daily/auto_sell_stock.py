@@ -15,7 +15,7 @@ from Gemini.api_handler import ApiHandler
 from models.evaluation_result import EvaluationResult
 from lib.code_validator import validate_stock_code
 from utils.logging_config import setup_logging
-from utils.date_util import is_holiday as is_holiday_check
+from utils.date_util import is_holiday
 import json
 from typing import Optional, Dict, List
 import argparse
@@ -46,9 +46,9 @@ class AutoSellStock:
         business_days = 0
         current_date_iter = entry_date_obj
         while current_date_iter < today_obj:
-            # is_holiday_check は土日・祝日なら True を返す
+            # is_holiday は土日・祝日なら True を返す
             # is_holiday_checkの引数はdatetime.date型である必要がある
-            if not is_holiday_check(current_date_iter): # 平日ならカウント
+            if not is_holiday(current_date_iter): # is_holiday_check を is_holiday に変更
                 business_days += 1
             current_date_iter += timedelta(days=1)
         return business_days
@@ -571,7 +571,6 @@ class AutoSellStock:
 
 def main():
     """メイン処理"""
-    # ロガーの設定
     logger = setup_logging("auto_sell_stock")
 
     # コマンドライン引数の解析
@@ -581,11 +580,16 @@ def main():
     parser.add_argument('--debug', action='store_true', help='デバッグモードで実行')
     args = parser.parse_args()
 
-    try:
-        # AutoSellStockインスタンスの作成
-        auto_sell = AutoSellStock(logger, test_mode=args.test)
+    # --- 評価対象日（昨日）が非稼働日かどうかのチェック ---
+    today_date = date.today()
+    yesterday_date = today_date - timedelta(days=1)
+    if is_holiday(yesterday_date): # 昨日が休日か判定
+        logger.info(f"評価対象日 ({yesterday_date}) は非稼働日（土日祝）のため、本日の主要な売買判断処理をスキップします。")
+        return # 処理を終了
+    # --- ここまで変更 ---
 
-        # 保有証券情報の取得
+    try:
+        auto_sell = AutoSellStock(logger, test_mode=args.test)
         holdings = auto_sell.get_holdings()
         if holdings is None: # Noneチェックも行う
             logger.error("保有証券情報の取得に失敗しました")

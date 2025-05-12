@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 import jpholiday
 import os
 from dotenv import load_dotenv
@@ -12,7 +12,7 @@ def get_current_datetime():
     """
     return datetime.now().strftime("%Y/%m/%d %H:%M:%S")
 
-def is_holiday():
+def is_holiday(today: date = None):
     """
     今日が休日（土日祝）かどうかを判定する関数です。
     debug_modeがonの場合は常にFalse（平日扱い）を返します。
@@ -22,15 +22,18 @@ def is_holiday():
     """
     load_dotenv(override=True)
     debug_mode = os.environ.get("DEBUG_MODE", "off").lower() == "on"
+    print(f"debug_mode: {debug_mode}")
     
     if debug_mode:
         return False
         
-    today = datetime.now().date()
+    if today is None:
+        today = datetime.now().date()
     # 土曜日は5、日曜日は6
     is_weekend = today.weekday() >= 5
     is_holiday = jpholiday.is_holiday(today)
     
+    print(f"today: {today}, is_weekend: {is_weekend}, is_holiday: {is_holiday}")
     return is_weekend or is_holiday
 
 if __name__ == "__main__":
